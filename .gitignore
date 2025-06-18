@@ -1,0 +1,20 @@
+# Caches
+/.mypy_cache
+/.pytest_cache
+
+# Logs
+/Logs
+
+# Project related readings
+readings_resources/
+
+# Virtual enviornment
+venv/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+
+# macOS Finder metadata
+.DS_Store
