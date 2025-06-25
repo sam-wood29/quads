@@ -1,39 +1,62 @@
 from quads.engine.logging_utils import setup_logger
-from quads.engine.core_game import Game, Player, Hand
+from quads.engine.core_game import Game, Player, Action, Phase, Position, ManualInputController
+from quads.deuces import Deck, Card
 from datetime import datetime
 from pprint import pformat
+import logging
 
-smoke = setup_logger(name=__name__,
+log = setup_logger(name="quads",
              log_file='logs/smoke.log',
-             mode='a')
+             mode='a',
+             level=logging.DEBUG)
 
-smoke.info(f'Logger Created at filename {smoke.name}, {datetime.now()}')
-smoke.info('executing scripts/smoke_check.py')
+log.info(f'Logger Created at filename {log.name}, {datetime.now()}')
+log.info('executing scripts/smoke_check.py\n')
 
 game = Game(players=[
-    Player(stack=100, name='steve'),
-    Player(stack=100, name='rodger'),
-    Player(stack=100, name='mike'),
-    Player(stack=100, name='allen'),
+    Player(stack=100, name='steve', controller=ManualInputController()),
+    Player(stack=100, name='rodger', controller=ManualInputController()),
+    Player(stack=100, name='mike', controller=ManualInputController()),
+    Player(stack=100, name='allen', controller=ManualInputController()),
+    Player(stack=100, name='paige', controller=ManualInputController())
 ])
 
-# Assign players seats within the game
-smoke.info('game.assign_players_ingame_new_seats()')
-game.assign_players_ingame_new_seats()
-player_seat_data = {player.name: player.seat_index for player in game.players}
-smoke.info(pformat(player_seat_data, sort_dicts=False))
+game.assign_seat_seat_index_to_game_players()
 
-# Assign positions to players based on their seats
-smoke.info('game.assign_player_positions_for_hand()')
-game.assign_player_positions_for_hand()
-game.players.sort(key=lambda player: player.seat_index)
-player_pos_data = {
-    player.name: (player.seat_index, player.position)
-    for player in game.players
-}
-smoke.info(pformat(player_pos_data, sort_dicts=False))
 
-# playing a hand
-# build this out and verify as we go.
-game.play_hand()
-smoke.info("game.play_hand")
+# ---------WRAP IN LARGER METHOD ---------------
+
+# reset players
+[p.reset_for_new_hand() for p in game.players]
+# a debug statement for the larger method.....
+example_list = game.players[:2]
+for p in example_list:
+    log.debug(f'name: {p.name}, has_folded: {p.has_folded}, current_bet: {p.current_bet}, '
+              f'cards: ({Card.int_to_str(p.hole_cards[0])}, {Card.int_to_str(p.hole_cards[1])})')
+log.info('INFO ------------ Game Initalized ------------')
+
+# assign positions
+ordered_ap_list = game.assign_player_positions()
+
+# post blinds
+game.post_blinds(ordered_ap_list=ordered_ap_list)
+
+# reset the pot
+log.info('INFO - will need to reset action log/history hear')
+game.pot = 0.0
+
+# Run the betting logic
+game.run_betting_round(phase=Phase.PREFLOP,
+                       ordered_ap_list=ordered_ap_list)
+
+
+
+
+
+
+
+
+
+
+
+# --------------------------------------------------------------

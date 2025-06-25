@@ -16,10 +16,8 @@ def test_logger():
         mode='r',
     ) as f:
         lines = f.readlines()
-        raw_line = lines[-2].strip() if lines else None
+        raw_line = lines[0].strip() if lines else None
         raw_line = repr(raw_line)
-        # print(f'Raw line: {raw_line}')
-        # print(type(raw_line))
         my_slice = raw_line[-6:-1]
         assert my_slice == 'time.'
 
@@ -122,7 +120,7 @@ class TestLookup:
             assert table.flush_lookup[prime_product] == 1
 
             # All values in the flush/unsuited tables should be unique and within [1, 7462]
-            all_ranks = list(table.flush_lookup.values() + list(table.unsuited_lookup.values()))
+            all_ranks = list(list(table.flush_lookup.values()) + list(table.unsuited_lookup.values()))
             assert len(all_ranks) == len(set(all_ranks)) # no duplicates
             assert all(1 <= r <= 7462 for r in all_ranks)
             

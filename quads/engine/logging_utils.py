@@ -3,10 +3,10 @@ import os
 
 def setup_logger(name=None,
     log_file='logs/quads.log',
-    level=logging.INFO,
+    level: int = logging.INFO,
     mode='w',
     console_handler = True,
-    formatter_input: str = '%(message)s\n'
+    formatter_input: str = '%(message)s'
     # Some examples of nice formatters to use
     # '%(asctime)s - %(name)s - %(levelname)s\n%(message)s\n'
 ) -> logging.Logger:
@@ -15,8 +15,8 @@ def setup_logger(name=None,
     logger.setLevel(level)
 
     # ???
-    if logger.handlers:
-        return logger # avoid duplicate handlers
+    if logger.hasHandlers():
+        logger.handlers.clear() # avoid duplicate handlers
     
     # Ensure the logs directory exists:
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -28,11 +28,13 @@ def setup_logger(name=None,
     if console_handler:
         ch = logging.StreamHandler()
         ch.setFormatter(formatter)
+        ch.setLevel(level)
         logger.addHandler(ch)
     
     # File handler
     fh = logging.FileHandler(log_file, mode=mode)
     fh.setFormatter(formatter)
+    fh.setLevel(level)
     logger.addHandler(fh)
 
     return logger
