@@ -3,18 +3,15 @@ import os
 
 def setup_logger(name=None,
     log_file='logs/quads.log',
-    level: int = logging.INFO,
-    mode='w',
+    level: int = logging.DEBUG,
+    mode='a',
     console_handler = True,
     formatter_input: str = '%(message)s'
-    # Some examples of nice formatters to use
-    # '%(asctime)s - %(name)s - %(levelname)s\n%(message)s\n'
 ) -> logging.Logger:
     """"""
     logger = logging.getLogger(name)
     logger.setLevel(level)
 
-    # ???
     if logger.hasHandlers():
         logger.handlers.clear() # avoid duplicate handlers
     
