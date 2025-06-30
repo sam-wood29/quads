@@ -10,17 +10,16 @@ Classes:
     Position: handles position assignment
     ManualInputController: handles manual player input
 """
-from typing import Optional, List, Tuple
-from random import shuffle
-from enum import Enum
+from typing import Optional, List, Tuple, Dict
+import random
+from enum import Enum, auto
 from quads.engine.logging_utils import setup_logger
 from quads.deuces import Card, Deck, Evaluator
 from pprint import pformat
 
 # Set up the project-wide logger
-
-log = setup_logger("quads")
-
+# log = setup_logger("quads")
+log = setup_logger('core')
 # Game logic supports up to ten player positions
 POSITIONS_BY_PLAYER_COUNT = {
     2: ["Button", "BB"],
@@ -72,6 +71,9 @@ class Player:
         self.position: Optional[str] = None
         log.debug(f"Initialized Player: {self.__dict__}")
 
+    def __str__(self):
+        return (self.name, self.position, self.stack, self.pot_contrib, self.has_acted, self.has_folded)
+
     def reset_for_new_hand(self):
         """
         6/21 - Prepares Player Attributes for a new hand.
@@ -81,7 +83,6 @@ class Player:
             -:attr:`has_folded`
             -:attr:`current_bet`
         """
-        self.hole_cards = None
         self.has_folded = False
         self.current_bet = 0.0
         self.pot_contrib = 0.0
@@ -93,14 +94,13 @@ class Action(Enum):
     """
     Enum representing possible player actions.
     """
-    FOLD = 'fold'
-    CALL = 'call'
-    CHECK = 'check'
-    BET = 'bet'
-    RAISE = 'raise'
+    FOLD = auto()
+    CALL = auto()
+    CHECK = auto()
+    RAISE = auto()
+    BET = auto()
+    All_IN = auto()
     
-
-
 class Phase(Enum):
     """
     Enum representing the current phase of the hand.
@@ -122,7 +122,6 @@ class Game:
     def __init__(self,
                  small_blind: float = 0.25,
                  big_blind: float = 0.50,
-                 debug = False,
                  players: Optional[List[Player]] = None
             ):
         """
@@ -135,13 +134,22 @@ class Game:
         self.community_cards = []
         self.dealer_index = 0
         self.pot = 0.0
-        self.phase = "predeal"
+        self.phase = Phase.WAITING
         self.action_log = []
         self.deck = Deck()
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.minimum_raise = big_blind
         self.minimum_raise_inc = small_blind
+
+    def __str__(self):
+        return (
+            f'phase: {self.phase}, pot: {self.pot}, dealer index: {self.dealer_index}\n' +
+        "\n".join(
+            f'{p.position}, {p.name}, stack: {p.stack}, seat: {p.seat_index}, folded: {p.has_folded})'
+            for p in self.players
+            )
+        )
 
     def add_player(self, player_or_list):
         """
@@ -170,39 +178,6 @@ class Game:
         """
         self.players.append(player)
         # log.debug(Game._add_single_player.__doc__)
-
-    def get_action_order(self, phase: Phase) -> List[Player]:
-        """
-        6/22 - Might be able to depricate this by passing ordered_ap_list
-        """
-        log.debug(f"Getting action order for phase: {phase.name}")
-        active_players = [p for p in self.players if p.is_playing and not p.has_folded]
-        if len(active_players) < 2:
-            return []
-        if phase == Phase.PREFLOP:
-            # Preflop: rotate from Big Blind using position labels
-            position_list = POSITIONS_BY_PLAYER_COUNT[len(active_players)]
-            bb_index = position_list.index("Big Blind")
-            rotated_positions = position_list[bb_index + 1:] + position_list[:bb_index + 1]
-            log.debug(f"Rotated position order: {rotated_positions}")
-            ordered_players = []
-            for pos in rotated_positions:
-                for p in self.players:
-                    if p.position == pos and p.is_playing and not p.has_folded:
-                        ordered_players.append(p)
-            log.debug(f"Preflop action order: {[p.name for p in ordered_players]}")
-            return ordered_players
-        else:
-            # Postflop: act from seat left of dealer
-            ordered_players = []
-            n = len(self.players)
-            for i in range(1, n + 1):
-                idx = (self.dealer_index + i) % n
-                p = self.players[idx]
-                if p.is_playing and not p.has_folded:
-                    ordered_players.append(p)
-            log.debug(f"Postflop action order: {[p.name for p in ordered_players]}")
-            return ordered_players
 
     def start_new_hand(self):
         """
@@ -278,10 +253,11 @@ class Game:
             player.position = positions_by_count[idx]
             ordered_ap_list.append(player)
         
-        log.debug('\nUpdated player positions:')
-        log.debug('(Name, position, seat index)')
-        for p in ordered_ap_list:
-            log.debug(f'{p.name}, {p.position}, {p.seat_index}')
+        # DEBUG
+        # log.debug('\nUpdated player positions:')
+        # log.debug('(Name, position, seat index)')
+        # for p in ordered_ap_list:
+        #     log.debug(f'{p.name}, {p.position}, {p.seat_index}')
 
         # log.debug(Game.assign_player_positions.__doc__)
         # Returning this to cut out on logic down the road?
@@ -306,31 +282,38 @@ class Game:
         Returns:
             None
         """
-        # double blinds or something in the future.
+        # 1. Blinds are game set if None
         if sb_amount is None:
             sb_amount = self.small_blind
         if bb_amount is None:
             bb_amount = self.big_blind
-
+        
+        # 2. Get SB & BB Players
         if len(ordered_ap_list) == 2:
             bb_player = ordered_ap_list[1]
+            sb_player = ordered_ap_list[0]
         else:
             sb_player = ordered_ap_list[1]
             bb_player = ordered_ap_list[2]
 
-        sb_player.stack -= sb_amount
-        sb_player.pot_contrib += sb_amount
-        bb_player.stack -= bb_amount
-        bb_player.pot_contrib += bb_amount
+        # 3. Get how much Blind Players are paying
+        sb_paid = min(sb_amount, sb_player.stack)
+        bb_paid = min(bb_amount, bb_player.stack)
 
-        self.pot += bb_amount + sb_amount
-        log.debug('\nposting blinds...')
-        log.info('Will need to update tracking here?')
+        # 4. Update the appropiate attributes
+        sb_player.stack -= sb_paid
+        sb_player.pot_contrib += sb_paid
+        sb_player.current_bet += sb_paid
+        bb_player.stack -= bb_paid
+        bb_player.pot_contrib += bb_paid
+        bb_player.current_bet += bb_paid
+
+        self.pot += bb_paid + sb_paid
+        # DEBUG
+        # log.debug('\nposting blinds...')
         # Debugging
-        log.debug(f'pot: {self.pot}')
-        if sb_player:
-            log.debug(f'{sb_player.position}, {sb_player.name}, {sb_player.stack}, {sb_player.pot_contrib}')
-        log.debug(f'{bb_player.position}, {bb_player.name}, {bb_player.stack}, {bb_player.pot_contrib}')
+        # log.debug(f'pot: {self.pot}')
+        # log.debug(f'{bb_player.position}, {bb_player.name}, {bb_player.stack}, {bb_player.pot_contrib}')
 
     def deal_hole_cards(self):
         
@@ -384,67 +367,134 @@ class Game:
         self.phase = Phase.RIVER
         log.debug(f"River: {self.community_cards[-1]}")
 
-    def validate_player_action(self, amount):
-        player1 = self.players[0]
-        log.debug(player1.name)
+    def validate_player_action(self, acting_player, amount_to_call) -> Dict:
+        '''
+        Returns a dictionary with...
+        - valid actions a player can take
+        - valid raise/bet amounts (if applicable)
+        - all-in amount
+        '''
+        actions = set(Action)
 
-    def run_betting_round(self, phase: Phase, ordered_ap_list: List):
+        # 1. forced inaction (no chips)
+        if acting_player.stack <= 0:
+            valid_dict = {
+                'actions': [],
+                'valid_raise_or_bet_amounts': [],
+                'all_in_amount': 0.0
+            }
+        # 2. Remove illegal actions based on game state.
+        if amount_to_call > 0.0:
+            actions.discard(Action.CHECK)
+            actions.discard(Action.BET)
+        else:
+            actions.discard(Action.CALL)
+            actions.discard(Action.RAISE)
+        
+        if acting_player.stack < amount_to_call:
+            actions.discard(Action.CALL)
+        
+        if (
+            Action.RAISE in actions and
+            acting_player.stack < amount_to_call + self.minimum_raise
+        ):
+            actions.discard(Action.RAISE)
+        if (
+            Action.BET in actions and 
+            acting_player.stack < self.minimum_raise
+        ):
+            actions.discard(Action.BET)
+        valid_bet_raise_amounts = []
+        # 3. Build valid raise/bet amounts
+        if Action.RAISE in actions or Action.BET in actions:
+            min_amount = self.minimum_raise
+            max_amount = acting_player.stack
+            increment = self.minimum_raise_inc
+            # should always be a sb
+            minimum_raise = min(min_amount, max_amount)
+            if minimum_raise < max_amount:
+                amount = minimum_raise
+                # want to seperate all in/raise & bet logically
+                while amount < max_amount:
+                    valid_bet_raise_amounts.append(round(amount, 2))
+                    amount += increment
+            else:
+                valid_bet_raise_amounts.append(round(max_amount, 2))
+            
+        valid_dict = {
+            'actions': list(actions),
+            'valid_raise_or_bet_amount': valid_bet_raise_amounts,
+            'all_in_amount': round(acting_player.stack, 2)
+        }
+        # 4. Some debugging logic
+        loggable_actions = {
+            k: v for k, v in valid_dict.items()
+            if k in {'actions', 'all_in'}
+        }
+
+        log.debug(f'valid_actions: {pformat(loggable_actions, width=120)}')
+        raise_sizes = valid_dict.get('valid_raise_or_bet_amount', [])
+        num_to_show = 5
+        if len(raise_sizes) > num_to_show * 2:
+            summarized = raise_sizes[:num_to_show] + ['...'] + raise_sizes[-num_to_show:]
+        else:
+            summarized = raise_sizes
+        log.debug(f'valid_raise_or_bet_amount (sample): {pformat(summarized, width=120)}')
+        log.debug(f'all_in_amount: {valid_dict["all_in_amount"]}')
+
+        # 5. return
+        return valid_dict
+    
+    def get_action_order(self):
         """
-        6/22 - WIP - Full logic for running a betting round.
+        Returns action order for a given series of betting.
+        """
+        # 1. PREFLOP: Starts left of BB
+        if self.phase == Phase.PREFLOP:
+            bb_index = next(i for i, p in enumerate(self.players) if p.position == 'BB')
+            start_index = (bb_index + 1) % len(self.players)
+            log.debug(f'start index = (bb_index({bb_index}) + 1) % len players ({len(self.players)}) = {start_index}')
+        # 2. FLOP/TURN/RIVER: Start left of Dealer
+        else:
+            dealer_index = next(i for i, p in enumerate(self.players) if p.position == 'Button')
+            start_index = (dealer_index + 1) % len(self.players)
+            log.debug(f'start index = (bb_index({bb_index}) + 1) % len players ({len(self.players)}) = {start_index}')
+        # 3. Slice list to start with start index
+        ordered = self.players[start_index:] + self.players[:start_index]
+        log.debug(f'[start_index:] = players[{[p.name for p in self.players[start_index:]]}]')
+        log.debug(f'[:start_index] = players[{[p.name for p in self.players[:start_index]]}]')
+        log.debug(f'[ordered] = [{[(p.name, p.position) for p in ordered]}]')
+        return ordered
+
+    def run_betting_round(self, phase: Phase, active_player_list: List):
+        """
+        6/25 - WIP - Main utility funciton for running a betting round.
 
         Args:
-        - ordered_ap_list: ordered list of active players (starting index may very by phase?)
-        - phase: phase of the hand
+        phase: Phase of betting round to execute
+        active_player_list: list of active players within the hand:
+                            Useful for logic of multiple phases. 
         """
-        # New hopefully improved version of this...
-        log.debug('\nDEBUG ------------ run betting round ------------\n')
         self.phase = phase
-        remaining_players = len(ordered_ap_list)
-        log.debug(f'remaining_players: {remaining_players}')
-        log.debug('\nOrdered ap list\n')
-        # DEBUG
-        for p in ordered_ap_list:
-            log.debug(f'name: {p.name}, has_acted: {p.has_acted}, position {p.position}')
-
-        log.debug('\nCreating action order list...\n')
-        
-        log.debug(f'Ordered active player list before rotation: {[(p.name, p.position) for p in ordered_ap_list]}')
-        if self.phase == Phase.PREFLOP and remaining_players > 2:
-            bb_player = ordered_ap_list[2]
-            log.debug(f'bb_player name: {bb_player.name}')
-            ordered_ap_list = ordered_ap_list[-2:] + ordered_ap_list[:-2]
-            log.debug('More than two players')
-            log.debug(f'Ordered active player list: after rotation{[(p.name, p.position) for p in ordered_ap_list]}\n')
-            
-        if self.phase == Phase.PREFLOP and remaining_players == 2:
-            bb_player = ordered_ap_list[1]
-            ordered_ap_list = ordered_ap_list[-1:] + ordered_ap_list[:-1]
-            log.debug('two players\n\n')
-            log.debug(f'Ordered active player list: {[(p.name, p.position) for p in ordered_ap_list]}')
-
+        action_order = self.get_action_order()
         last_raiser = None
-        
-        log.debug(f'bb_player: {bb_player.name}, pot_contrib: {bb_player.pot_contrib}')
+        if self.phase == Phase.PREFLOP:
+            bb_player = action_order[-1]
+            amount_to_call = min(bb_player.current_bet, self.big_blind)
+        else:
+            amount_to_call = 0.0
+        log.debug(f'amount to call: {amount_to_call}')
 
-        call_amount = bb_player.pot_contrib
-        log.debug(f'call_amount: {call_amount}')
-        players_yet_to_act = ordered_ap_list.copy()
+        players_yet_to_act = action_order.copy()
         # DEBUG
-        for p in ordered_ap_list:
-            log.debug(f'{p.name}, {p.position}, {p.has_acted}')
-        
-        
         while players_yet_to_act:
-            acting_p  = players_yet_to_act.pop(0) # 'acting player'
+            acting_player  = players_yet_to_act.pop(0)
+            # validate side pots later with player.all_in
+            player_action, action_amount, last_raiser = self.get_player_action(acting_player=acting_player,
+                                                             amount_to_call=amount_to_call)                                        
+            
+            # 6/27 -----------------------------------------------------------------------------------------
 
-
-            # Going to pass this in so that AI/controller has a set of answers to work with.
-            # valid_actions = self.get_valid_actions(player, call_amount, min_raise, max_raise)
-
-
-            p_action, action_amount, p_all_in, last_raiser = self.get_player_action(player=acting_p,
-                                                             call_amount=call_amount) # This function needs be checked
-                                                             
             match p_action:
                 case 'fold':
                     acting_p.has_folded = True
@@ -486,29 +536,25 @@ class Game:
             
             # Here DEBUG block just to know wtf is going on
             
-
-        
-
-
-
-
-        
-    def get_player_action(self, player, call_amount):
+    def get_player_action(self, acting_player, amount_to_call):
         """
-        6/22 - WIP - Send player state to the player controller for it to make a decision.
+        6/27 - WIP - Send player state to the player controller for it to make a decision.
 
         Returns:
-            - Action: (type): Enum: e.g., Action.FOLD, ACTION.RAIASE.
-            - action_amount: (type): float: for example the raise amount.
+            - Action: (type): Action:
+            - action_amount: (type): float:
 
         Future Returns:
             - p_all_in: I think I would rather it be a player attribute
             - last_raiser: This could probably be handled within the
               run betting round function.
         """
+
+        valid_actions = self.validate_player_action(acting_player,
+                                    amount_to_call)
+        assert 1 == 2
         
-        
-        self.validate_player_action(player, call_amount)
+                                    
 
         
         game_state = {
@@ -535,22 +581,27 @@ class Game:
             player.current_bet = 0
         log.debug("Player bets reset.")
 
-    def assign_seat_seat_index_to_game_players(self):
+    def assign_seat_seat_index_to_game_players(self, rng):
         """
-        6/21 - Shuffles all players in the game, then assigns seat indexs based on order.
+        Shuffles players and assigns seat indices.
 
-        Adds/Updates the following values:
-            - :attr:`seat_index`
+        Uses optional `rng` (random number generator) parameter 
+        to inject deterministic randomness for testing.
+
+        Args:
+        rng (random number generator): If None, uses default RNG.
+
+        Updates: 
+        player.seat_index
         """
-        shuffle(self.players)
+        rng = rng or random
+        rng.shuffle(self.players)
         for idx, player in enumerate(self.players):
             player.seat_index = idx
-
         # - DEBUGGING
-        player_seat_map = {player.name: player.seat_index for player in self.players}
-        log.debug(f'player name, seat_index map: \n{player_seat_map}\n')
+        # player_seat_map = {player.name: player.seat_index for player in self.players}
+        # log.debug(f'player name, seat_index map: \n{player_seat_map}\n')
 
-    
 
 class Position:
     """
@@ -574,7 +625,6 @@ class Position:
         log.debug(f"Seat {seat_index} with button at {button_index} is position {pos}")
         return pos
         
-
 
 class ManualInputController:
     """
@@ -628,5 +678,3 @@ class ManualInputController:
                 return (Action.RAISE, player.stack)
             else:
                 print("Unrecognized action. Try again.")
-
-
