@@ -22,13 +22,13 @@ class Game:
         """
         Initialize a new game instance.
         """
-        log.debug("Initializing new Game instance.")
         self.players: List[Player] = list()
         if players:
             self.add_player(players)
         self.community_cards = []
         self.dealer_index = 0
-        self.pot = 0.0
+        self.main_pot = 0.0
+        self.side_pots = []
         self.phase = Phase.WAITING
         self.action_log = []
         self.deck = Deck()
@@ -74,28 +74,35 @@ class Game:
         self.players.append(player)
         # log.debug(Game._add_single_player.__doc__)
 
+    def reset_state(self):
+        '''
+        resets game state for a new hand.
+        '''
+        self.main_pot = 0.0
+        self.side_pots = []
+        self.community_cards = []
+
+        log.debug('Game State Reset')
+        log.debug(self.__str__())
+
     def start_new_hand(self):
         """
         Start a new hand: rotate dealer, reset players, assign positions, post blinds, shuffle deck, deal hole cards, and run preflop betting.
         """
         log.debug("Starting new hand.")
-        self.rotate_dealer()
+        self.assign_seat_index_to_game_players()
+        # hole cards are dealt here
+        [p.reset_for_new_hand() for p in self.players]
+        self.reset_state()
         self.assign_player_positions()
         self.post_blinds()
-        self.deck.shuffle()
-        self.starting_player_count = len([p for p in self.players if p.is_playing])
-        self.community_cards = []
-        self.pot = 0.0
-        self.phase = Phase.PREFLOP
-        self.deal_hole_cards()
-        self.run_betting_round(Phase.PREFLOP)
-
+        
     def execute_hand(self):
         """
         Execute a full hand from start to showdown.
         """
-        log.debug("Executing full hand.")
         self.start_new_hand()
+        self.run_betting_round(phase=Phase.PREFLOP, active_player_list=self.get_action_order())
         self.deal_flop()
         self.run_betting_round(Phase.FLOP)
         self.deal_turn()
@@ -476,7 +483,7 @@ class Game:
             player.current_bet = 0
         log.debug("Player bets reset.")
 
-    def assign_seat_seat_index_to_game_players(self, rng):
+    def assign_seat_index_to_game_players(self, rng):
         """
         Shuffles players and assigns seat indices.
 

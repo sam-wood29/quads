@@ -10,7 +10,7 @@ class Action(Enum):
     CHECK = auto()
     RAISE = auto()
     BET = auto()
-    All_IN = auto()
+    ALL_IN = auto()                  
     
 
 class Phase(Enum):

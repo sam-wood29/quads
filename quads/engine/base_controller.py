@@ -1,5 +1,6 @@
 from typing import Tuple, Optional
-from quads.engine.core_game import Action
+from quads.engine.extras import Action
+
 
 class BaseController:
     def decide(self, player, game_state, **kwargs) -> Tuple['Action', Optional[float]]:

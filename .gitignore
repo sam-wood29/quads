@@ -18,3 +18,6 @@ __pycache__/
 
 # macOS Finder metadata
 .DS_Store
+
+# some markdown files
+*.md

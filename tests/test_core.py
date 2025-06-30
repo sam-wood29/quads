@@ -1,5 +1,7 @@
 from quads.engine.logging_utils import setup_logger
-from quads.engine.core_game import Game, Player, Action, Phase, Position, ManualInputController
+from quads.engine.player import Player
+from quads.engine.extras import Action, Phase
+from quads.engine.game import Game
 from quads.deuces import Deck, Card
 from datetime import datetime
 import random
@@ -22,7 +24,7 @@ def early_game():
             Player(name='linda',stack=100),
         ]
     )
-    game.assign_seat_seat_index_to_game_players(rng=random.Random(1))
+    game.assign_seat_index_to_game_players(rng=random.Random(1))
     log.debug(f'players: {[(p.name, p.seat_index) for p in game.players]}')
     return game
 
@@ -80,9 +82,6 @@ def test_early_game(early_game):
     game.run_betting_round(phase=Phase.PREFLOP, active_player_list=action_order)
     
 
-
-
-
 @pytest.fixture()
 def heads_up_game():
     game=Game(
@@ -93,7 +92,7 @@ def heads_up_game():
             Player(name='joy',stack=100),
         ]
     )
-    game.assign_seat_seat_index_to_game_players(rng=random.Random(1))
+    game.assign_seat_index_to_game_players(rng=random.Random(1))
     [p.reset_for_new_hand() for p in game.players]
     game.pot = 0.0
     dealer_ordered_players = game.assign_player_positions()
@@ -120,4 +119,3 @@ def test_heads_up(heads_up_game):
     assert action_order[1].position == 'BB', f'{action_order[1].position}'
 
     
-
