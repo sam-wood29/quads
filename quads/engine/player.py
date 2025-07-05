@@ -1,5 +1,5 @@
 from typing import Optional, Tuple
-from quads.deuces import Deck, Card
+from quads.deuces import Card
 from quads.engine.logging_utils import setup_logger
 
 log = setup_logger(__name__)
@@ -47,15 +47,16 @@ class Player:
 
     def reset_for_new_hand(self):
         """
-        6/21 - Prepares Player Attributes for a new hand.
-
-        Adds/Updates the following values:
-
-            -:attr:`has_folded`
-            -:attr:`current_bet`
+        Reset player attributes for a new hand.
+        
+        Updates the following values:
+            - has_folded: Reset to False
+            - current_bet: Reset to 0.0
+            - pot_contrib: Reset to 0.0
+            - hole_cards: Reset to None (will be dealt by Hand class)
         """
         self.has_folded = False
         self.current_bet = 0.0
         self.pot_contrib = 0.0
-        deck = Deck()
-        self.hole_cards = deck.draw(2)
+        self.hole_cards = None  # Will be dealt by Hand class
+        log.debug(f"Reset {self.name} for new hand")

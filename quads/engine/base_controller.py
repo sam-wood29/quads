@@ -1,5 +1,6 @@
 from typing import Tuple, Optional
 from quads.engine.extras import Action
+import logging
 
 
 class BaseController:
@@ -13,6 +14,8 @@ class GlobalScriptController(BaseController):
     '''
     def __init__(self, script: list[Tuple[str, 'Action', Optional[float]]]):
         self.script = script.copy()
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
     
     def decide(self, player, game_state, **kwargs) -> Tuple['Action', Optional[float]]:
         if not self.script:
@@ -22,6 +25,7 @@ class GlobalScriptController(BaseController):
         if next_player_name != player.name:
             raise ValueError(f'Script mismatch: expected {next_player_name}, got {player.name}')
         
+        self.logger.info(f'{player.name} decides... action: {action} amount: {amount}')
         return action, amount
 
         
