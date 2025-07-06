@@ -304,6 +304,7 @@ class Hand:
                 self.pot += call_amt
                 self._log_action(player, "CALL" if action == Action.CALL else "CHECK", amount=call_amt)
                 self.logger.debug(f"{player.name} {'calls' if action == Action.CALL else 'checks'} {call_amt}.")
+                self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
             elif action == Action.RAISE:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
                 raise_amt = amount
@@ -316,11 +317,22 @@ class Hand:
                 highest_bet = player.current_bet
                 self._log_action(player, "RAISE", amount=bet_amt)
                 self.logger.debug(f"{player.name} raises to {player.current_bet}.")
-                # All other players who haven't folded and aren't all-in must act again if they haven't matched the new bet
-                players_yet_to_act = [
-                    p for p in self.players_in_position_order
+                # Rebuild using the original action order, but reorder to continue from next player
+                remaining_players = [
+                    p for p in action_order
                     if not p.has_folded and p.stack > 0 and p != player and p.current_bet < highest_bet
                 ]
+                
+                # Find the index of the current player in the original action order
+                raiser_index = action_order.index(player)
+                
+                # Reorder so action continues from the next player after the raiser
+                players_yet_to_act = []
+                for i in range(len(action_order)):
+                    check_index = (raiser_index + 1 + i) % len(action_order)
+                    check_player = action_order[check_index]
+                    if check_player in remaining_players:
+                        players_yet_to_act.append(check_player)
             else:
                 # logic for 'Bet' is unknown. it in theory is the same as 'Raise', but first.
                 self.logger.warning(f"Unknown action {action} from {player.name}")
@@ -428,6 +440,7 @@ class Hand:
         
         self.action_log.append(log_entry)
         self.logger.debug(f"Action logged: {log_entry}")
+        self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
 
     def get_hand_summary(self) -> Dict:
         """Get a summary of the hand for analysis."""

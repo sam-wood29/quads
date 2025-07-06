@@ -219,4 +219,4 @@ def test_raise_and_reraise():
     assert result["winners"][0].name == "alice"
     
     alice = next(p for p in players if p.name == "alice")
-    assert alice.stack == pytest.approx(116.25, abs=0.01)  
+    assert alice.stack == pytest.approx(110.25, abs=0.01)  
