@@ -293,4 +293,7 @@ def test_more_complex_scenario():
     log.info(pformat(result['pot_distribution']))
     player0 = next(p for p in players if p.name == '0')
     assert player0.stack == 34.5
-    assert 1 == 2 # Keep this here to see output
+    player1 = next(p for p in players if p.name == '1')
+    player2 = next(p for p in players if p.name == '2')
+    assert player1.stack == 2
+    assert player2.stack == 5

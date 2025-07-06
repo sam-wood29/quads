@@ -306,7 +306,9 @@ class Hand:
             elif action == Action.RAISE:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
                 total_bet = amount
-                bet_amt = min(total_bet, player.stack)
+                additional_bet = total_bet - player.current_bet
+                bet_amt = min(additional_bet, player.stack)
+                
                 player.stack -= bet_amt
                 player.current_bet += bet_amt
                 self.pot += bet_amt
