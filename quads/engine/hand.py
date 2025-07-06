@@ -307,9 +307,7 @@ class Hand:
                 self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
             elif action == Action.RAISE:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
-                raise_amt = amount
-                to_call = amount_to_call
-                total_bet = to_call + raise_amt
+                total_bet = amount
                 bet_amt = min(total_bet, player.stack)
                 player.stack -= bet_amt
                 player.current_bet += bet_amt
