@@ -4,6 +4,7 @@ from quads.engine.extras import Action, Phase
 from quads.engine.hand import Hand
 from quads.engine.base_controller import GlobalScriptController
 from quads.deuces import Card, Deck
+from pprint import pformat
 import random
 import logging
 import pytest
@@ -219,4 +220,77 @@ def test_raise_and_reraise():
     assert result["winners"][0].name == "alice"
     
     alice = next(p for p in players if p.name == "alice")
-    assert alice.stack == pytest.approx(110.25, abs=0.01)  
+    assert alice.stack == pytest.approx(110.25, abs=0.01)
+    
+def test_more_complex_scenario():
+    script = [
+        # Preflop
+        ("3", Action.CALL, 0.50),
+        ("4", Action.RAISE, 1),
+        ("5", Action.CALL, 1),
+        ("6", Action.CALL, 1),
+        ("0", Action.RAISE, 2),
+        ("1", Action.CALL, 2),
+        ("2", Action.CALL, 2),
+        
+        ("3", Action.FOLD, None),
+        ("4", Action.FOLD, None),
+        ("5", Action.CALL, 2),
+        ("6", Action.RAISE, 3),
+        ("0", Action.CALL, 3),
+        ("1", Action.CALL, 3),
+        ("2", Action.CALL, 3),
+        
+        ("5", Action.CALL, 3),
+        # FLOP
+        ("1", Action.CHECK, None),
+        ("2", Action.RAISE, 1),
+        ("5", Action.CALL, 1),
+        ("6", Action.RAISE, 2),
+        ("0", Action.CALL, 2),
+        
+        ("1", Action.CALL, 2),
+        ("2", Action.CALL, 2),
+        ("5", Action.FOLD, None),
+        # TURN
+        ("1", Action.CHECK, None),
+        ("2", Action.CHECK, None),
+        ("6", Action.RAISE, 1),
+        ("0", Action.RAISE, 2),
+        
+        ("1", Action.RAISE, 3),
+        ("2", Action.FOLD, None),
+        ("6", Action.FOLD, None),
+        ("0", Action.CALL, 3),
+        # River
+        ("1", Action.CHECK, None),
+        ("0", Action.RAISE, 1),
+        
+        ("1", Action.FOLD, None),
+    ]
+    controller = GlobalScriptController(script=script)
+    players = [
+        Player(name='0', stack=10, controller=controller),
+        Player(name='1', stack=10, controller=controller),
+        Player(name='2', stack=10, controller=controller),
+        Player(name='3', stack=10, controller=controller),
+        Player(name='4', stack=10, controller=controller),
+        Player(name='5', stack=10, controller=controller),
+        Player(name='6', stack=10, controller=controller)
+    ]
+    for i, p in enumerate(players):
+        p.seat_index = i
+    
+    hand = Hand(
+        players=players,
+        small_blind=0.25,
+        big_blind=0.50,
+        dealer_index=0,
+        hand_id='more_complex_test'
+    )
+    result = hand.play()
+    log.info('Pot Distribution...')
+    log.info(pformat(result['pot_distribution']))
+    player0 = next(p for p in players if p.name == '0')
+    assert player0.stack == 34.5
+    assert 1 == 2 # Keep this here to see output

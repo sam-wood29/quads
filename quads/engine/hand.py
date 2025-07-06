@@ -41,6 +41,7 @@ class Hand:
         self.big_blind = big_blind
         self.dealer_index = dealer_index
         self.logger = logger or setup_logger(f"hand_{hand_id}" if hand_id else "hand")
+        self.logger.setLevel(logging.INFO)
         self.hand_id = hand_id
         
         # Hand state
@@ -59,8 +60,6 @@ class Hand:
         self.positions_assigned = False
         self.blinds_posted = False
         
-        # So I can actually figure out wtf is going on
-        self.logger.setLevel(logging.INFO)
         
         self.logger.debug(f"Hand initialized with {len(players)} players, dealer at seat {dealer_index}")
         self.logger.debug(f"Starting stacks: {self.start_stacks}")
@@ -124,7 +123,7 @@ class Hand:
 
     def _assign_positions(self):
         """Assign positions to players based on dealer index."""
-        self.logger.debug("Assigning player positions")
+        self.logger.info("Assigned Player Positions")
         
         # Get players who are playing
         active_players = [p for p in self.players if p.is_playing]
@@ -154,8 +153,7 @@ class Hand:
             player = seat_to_player_map[seat_index]
             player.position = position_names[idx]
             players_in_position_order.append(player)
-            self.logger.debug(f"Player {player.name} assigned position {player.position}")
-            
+            self.logger.info(f"Player {player.name}    {player.position}")
         
         # for use of blinds, betting, etc.        
         self.players_in_position_order = players_in_position_order
