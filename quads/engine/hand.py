@@ -26,7 +26,8 @@ class Hand:
                  logger: Optional[logging.Logger] = None,
                  hand_id: Optional[str] = None,
                  min_raise: Optional[float] = None,
-                 max_raise: Optional[float] = None):
+                 max_raise: Optional[float] = None,
+                 betting_increments: str = 'none'):
         """
         Initialize a new hand.
         
@@ -37,8 +38,9 @@ class Hand:
             dealer_index: Seat index of the dealer
             logger: Logger instance for this hand
             hand_id: Unique identifier for this hand
-            min_raise: Minimum raise amount (defaults to big blind)
+            min_raise: Minimum raise amount (defaults to big blind for unopened pots)
             max_raise: Maximum raise amount (None for no limit)
+            betting_increments: Betting increment rule ('none', 'big_blind', 'small_blind')
         """
         self.players = players
         self.small_blind = small_blind
@@ -49,8 +51,9 @@ class Hand:
         self.hand_id = hand_id
         
         # Betting structure
-        self.min_raise = min_raise or self.big_blind  # Default to big blind
+        self.min_raise = min_raise  # Custom min raise (None = use big blind)
         self.max_raise = max_raise  # None for no limit
+        self.betting_increments = betting_increments  # 'none', 'big_blind', 'small_blind'
         self.last_raise_amount = 0  # Track last raise for min-raise rule
         self.current_round_raises = []  # Track all raises in current round
         
@@ -75,8 +78,6 @@ class Hand:
         self.logger.debug(f"Starting stacks: {self.start_stacks}")
         self.logger.debug(f"Betting structure: min_raise={self.min_raise}, max_raise={self.max_raise}")
         
-        
-
     def play(self) -> Dict:
         """
         Play a complete hand from start to finish.
@@ -296,7 +297,6 @@ class Hand:
             self.logger.info(f'{player.name} is acting player....')
             if player.has_folded or player.stack == 0:
                 continue
-
             # Calculate amount to call
             amount_to_call = highest_bet - player.current_bet
 
@@ -562,7 +562,8 @@ class Hand:
             'raise_amounts': [],
             'min_raise': None,
             'max_raise': None,
-            'amount_to_call': amount_to_call
+            'amount_to_call': amount_to_call,
+            'betting_increments': self.betting_increments
         }
         
         # Always can fold
@@ -573,6 +574,8 @@ class Hand:
             valid_actions['actions'].append(Action.CALL)
         else:
             valid_actions['actions'].append(Action.CHECK)
+        
+        # -- 7/7 looks good
         
         # Can raise if player has chips and it's a valid raise
         if player.stack > amount_to_call:
@@ -591,7 +594,7 @@ class Hand:
                 valid_actions['min_raise'] = min_raise
                 valid_actions['max_raise'] = max_raise
                 
-                # Generate valid raise amounts
+                # Generate valid raise amounts (respecting betting increments)
                 valid_actions['raise_amounts'] = self._generate_raise_amounts(
                     min_raise, max_raise, player.stack
                 )
@@ -600,12 +603,18 @@ class Hand:
 
     def _calculate_min_raise(self, highest_bet):
         """Calculate minimum raise amount."""
+        self.logger.info(f'self.last_raise_amount: {self.last_raise_amount}')
+        self.logger.info(f'highest bet: {highest_bet}')
         if self.last_raise_amount == 0:
-            # First raise of the round
-            return highest_bet + self.min_raise
+            # First raise of the round (unopened pot)
+            # Use big blind as minimum raise if min_raise is not set
+            min_raise_amount = self.min_raise if self.min_raise is not None else self.big_blind
+            min_raise = highest_bet + min_raise_amount
         else:
             # Subsequent raises must be at least the size of the last raise
-            return highest_bet + self.last_raise_amount
+            min_raise = highest_bet + self.last_raise_amount
+        self.logger.info(f'min raise: {min_raise}')
+        return min_raise
 
     def _calculate_max_raise(self, player, highest_bet):
         """Calculate maximum raise amount."""
@@ -617,15 +626,40 @@ class Hand:
             return min(self.max_raise, player.stack)
 
     def _generate_raise_amounts(self, min_raise, max_raise, player_stack):
-        """Generate list of valid raise amounts."""
+        """Generate list of valid raise amounts respecting betting increments."""
         amounts = []
         current = min_raise
         
+        # Determine increment step based on betting_increments rule
+        if self.betting_increments == 'big_blind':
+            step = self.big_blind
+        elif self.betting_increments == 'small_blind':
+            step = self.small_blind
+        else:  # 'none'
+            step = 0.01  # Small increment for flexibility
+        
         while current <= max_raise and current <= player_stack:
-            amounts.append(current)
-            current += self.min_raise  # Increment by minimum raise
+            # Only add amounts that follow the betting increment rule
+            if self._validate_betting_increment(current):
+                amounts.append(current)
+            
+            if step > 0:
+                current += step
+            else:
+                # For 'none', just add the minimum raise
+                amounts.append(current)
+                break
         
         return amounts
+
+    def _validate_betting_increment(self, amount):
+        """Validate that the bet amount follows the betting increment rule."""
+        if self.betting_increments == 'big_blind':
+            return amount % self.big_blind == 0
+        elif self.betting_increments == 'small_blind':
+            return amount % self.small_blind == 0
+        else:  # 'none'
+            return True  # No increment rule
 
     def _validate_action(self, action, amount, valid_actions, player):
         """Validate that the action is legal."""
@@ -637,25 +671,32 @@ class Hand:
             player_current_bet = player.current_bet
             raise_increment = amount - player_current_bet
             
-            self.logger.debug(f"Validating raise: player={player.name}, current_bet={player_current_bet}, "
+            self.logger.info(f"VALIDATION: player={player.name}, current_bet={player_current_bet}, "
                              f"amount={amount}, raise_increment={raise_increment}, "
-                             f"last_raise_amount={self.last_raise_amount}")
+                             f"last_raise_amount={self.last_raise_amount}, min_raise={self.min_raise}")
             
+            # Check minimum raise rule
             if self.last_raise_amount > 0:
                 if raise_increment < self.last_raise_amount:
-                    self.logger.debug(f"Invalid raise: {raise_increment} < {self.last_raise_amount}")
+                    self.logger.info(f"INVALID RAISE: {raise_increment} < {self.last_raise_amount}")
                     return False
             else:
-                if raise_increment < self.min_raise:
-                    self.logger.debug(f"Invalid first raise: {raise_increment} < {self.min_raise}")
+                min_raise_amount = self.min_raise if self.min_raise is not None else self.big_blind
+                if raise_increment < min_raise_amount:
+                    self.logger.info(f"INVALID FIRST RAISE: {raise_increment} < {min_raise_amount}")
                     return False
             
-            self.logger.debug(f"Valid raise: {raise_increment}")
+            # Check betting increment rule
+            if not self._validate_betting_increment(amount):
+                self.logger.info(f"INVALID BETTING INCREMENT: {amount} doesn't follow {self.betting_increments} rule")
+                return False
+            
+            self.logger.info(f"VALID RAISE: {raise_increment}")
         
         return True
 
     def _handle_invalid_action(self, player, valid_actions):
-        """Handle invalid actions by defaulting to fold or call."""
+        """Handle invalid action by throwing an error."""
         self.logger.warning(f"Invalid action from {player.name}, defaulting to fold")
         
         # If we can call, call. Otherwise fold.
