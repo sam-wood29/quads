@@ -46,12 +46,12 @@ class Game:
         """Add a single player to the game."""
         player.seat_index = len(self.players)
         self.players.append(player)
-        log.debug(f"Added player: {player.name} at seat {player.seat_index}")
+        log.debug(f"Added player: {player.name} to the game; seat index: {player.seat_index}.")
 
     def assign_seats(self, rng=None):
         """Randomly assign seat indices to players."""
-        rng = rng or random
-        rng.shuffle(self.players)
+        if rng is not None:
+            rng.shuffle(self.players)
         for idx, player in enumerate(self.players):
             player.seat_index = idx
         log.debug(f"Seats assigned: {[(p.name, p.seat_index) for p in self.players]}")

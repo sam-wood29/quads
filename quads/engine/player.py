@@ -40,7 +40,7 @@ class Player:
         self.hole_cards = hole_cards
         self.controller = controller
         self.position: Optional[str] = None
-        log.debug(f"Initialized Player: {self.__dict__}")
+        # log.debug(f"Initialized Player: {self.__dict__}")
 
     def __str__(self):
         return (self.name, self.position, self.stack, self.pot_contrib, self.has_acted, self.has_folded)
@@ -59,4 +59,4 @@ class Player:
         self.current_bet = 0.0
         self.pot_contrib = 0.0
         self.hole_cards = None  # Will be dealt by Hand class
-        log.debug(f"Reset {self.name} for new hand")
+        # log.debug(f"Reset {self.name} for new hand")

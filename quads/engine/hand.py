@@ -340,14 +340,17 @@ class Hand:
                 additional_bet = total_bet - player.current_bet
                 bet_amt = min(additional_bet, player.stack)
                 
+                previous_highest_bet = highest_bet  # Save before updating
                 player.stack -= bet_amt
                 player.current_bet += bet_amt
                 self.pot += bet_amt
                 highest_bet = player.current_bet
                 
-                # Track raise for min-raise rule
-                self.last_raise_amount = additional_bet
-                self.current_round_raises.append(additional_bet)
+                # Only update last_raise_amount if this is a full raise (not an all-in for less)
+                if bet_amt == (total_bet - player.current_bet + bet_amt):  # Player covered the full raise
+                    self.last_raise_amount = total_bet - previous_highest_bet
+                # Otherwise, do not update last_raise_amount (all-in for less)
+                self.current_round_raises.append(self.last_raise_amount)
                 
                 self._log_action(player, "RAISE", amount=bet_amt)
                 self.logger.debug(f"{player.name} raises to {player.current_bet}.")
@@ -378,10 +381,12 @@ class Hand:
                 player.current_bet += bet_amt
                 self.pot += bet_amt
                 highest_bet = player.current_bet
-                
-                # Track raise for min-raise rule
-                self.last_raise_amount = bet_amt
-                self.current_round_raises.append(bet_amt)
+
+                # Only update last_raise_amount if this is a full bet (not an all-in for less)
+                if bet_amt == total_bet:
+                    self.last_raise_amount = bet_amt
+                # Otherwise, do not update last_raise_amount (all-in for less)
+                self.current_round_raises.append(self.last_raise_amount)
                 
                 self._log_action(player, "BET", amount=bet_amt)
                 self.logger.debug(f"{player.name} bets {player.current_bet}.")
@@ -551,7 +556,10 @@ class Hand:
 
     def _reset_betting_state(self):
         """Reset betting state for a new betting round."""
-        self.last_raise_amount = 0
+        # Only reset to big blind at the start of the hand (preflop)
+        if self.phase == Phase.PREFLOP:
+            self.last_raise_amount = self.big_blind
+        # Otherwise, carry over the last raise amount (do not reset to 0)
         self.current_round_raises = []
         self.logger.debug("Reset betting state for new round")
 
