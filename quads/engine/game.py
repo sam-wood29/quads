@@ -10,6 +10,7 @@ from quads.engine.player import Player
 from quads.engine.hand import Hand
 from quads.engine.extras import Phase
 import random
+import logging
 
 log = setup_logger(__name__)
 
@@ -34,8 +35,10 @@ class Game:
         self.dealer_index = 0
         self.hand_count = 0
         self.session_log = []
+        self.logger = setup_logger(name=__name__, level=logging.INFO)
         
-        log.debug(f"Game initialized with blinds: SB={small_blind}, BB={big_blind}")
+        self.logger.info('\n=== New Game Created ===')
+        self.logger.info(f'Small Blind = ${self.small_blind}, Big Blind = ${self.big_blind}')
 
     def add_players(self, players: List[Player]):
         """Add players to the game."""
@@ -46,16 +49,17 @@ class Game:
         """Add a single player to the game."""
         player.seat_index = len(self.players)
         self.players.append(player)
-        log.debug(f"Added player: {player.name} to the game; seat index: {player.seat_index}.")
 
     def assign_seats(self, rng=None):
         """Randomly assign seat indices to players."""
         if rng is not None:
             rng.shuffle(self.players)
+        self.logger.info(f'Players are assigned to seat indexs.')
         for idx, player in enumerate(self.players):
             player.seat_index = idx
-        log.debug(f"Seats assigned: {[(p.name, p.seat_index) for p in self.players]}")
-
+            log.debug(f"Player: '{player.name}' -> Seat Index: {player.seat_index}")
+        self.logger.info('========================\n')
+            
     def rotate_dealer(self):
         """Rotate dealer to next active player."""
         n = len(self.players)
@@ -73,13 +77,12 @@ class Game:
         Returns:
             Dict containing hand results
         """
+        self.logger.info(f'{hand_id}\n------------------------------------------------------------------------------------------------------------')
         if len([p for p in self.players if p.is_playing]) < 2:
             raise ValueError("Need at least 2 active players to play a hand")
         
         self.hand_count += 1
         hand_id = hand_id or f"hand_{self.hand_count:04d}"
-        
-        log.debug(f"Starting hand {hand_id}")
         
         # Create and play the hand
         hand = Hand(

@@ -59,4 +59,3 @@ class Player:
         self.current_bet = 0.0
         self.pot_contrib = 0.0
         self.hole_cards = None  # Will be dealt by Hand class
-        # log.debug(f"Reset {self.name} for new hand")

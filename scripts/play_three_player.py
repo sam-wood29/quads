@@ -4,10 +4,14 @@ from quads.engine.game import Game
 
 def main():
     # Fixed player order: Alice (Button), Bob (SB), Charlie (BB)
-    alice = Player(name="Alice", stack=50.0, controller=ManualInputController())
-    bob = Player(name="Bob", stack=50.0, controller=ManualInputController())
-    charlie = Player(name="Charlie", stack=50.0, controller=ManualInputController())
-    players = [alice, bob, charlie]
+    button = Player(name="button", stack=50.0, controller=ManualInputController())
+    sb = Player(name="sb", stack=50.0, controller=ManualInputController())
+    bb = Player(name="bb", stack=50.0, controller=ManualInputController())
+    utg = Player(name="utg", stack=50.0, controller=ManualInputController())
+    mp = Player(name="mp", stack=50.0, controller=ManualInputController())
+    co = Player(name="co", stack=50.0, controller=ManualInputController())
+    
+    players = [button, sb, bb, utg, mp, co]
     for i, p in enumerate(players):
         p.seat_index = i
 
@@ -18,8 +22,7 @@ def main():
     )
     # Assign seats in order (no shuffle)
     game.assign_seats(rng=None)
-    print("Starting 3-player game (Alice = Button, Bob = SB, Charlie = BB)")
-    game.play_hand("manual_three_player")
+    game.play_hand(hand_id='hand_0001')
 
 if __name__ == "__main__":
     main() 

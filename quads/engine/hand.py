@@ -73,11 +73,6 @@ class Hand:
         self.positions_assigned = False
         self.blinds_posted = False
         
-        
-        self.logger.debug(f"Hand initialized with {len(players)} players, dealer at seat {dealer_index}")
-        self.logger.debug(f"Starting stacks: {self.start_stacks}")
-        self.logger.debug(f"Betting structure: min_raise={self.min_raise}, max_raise={self.max_raise}")
-        
     def play(self) -> Dict:
         """
         Play a complete hand from start to finish.
@@ -85,22 +80,12 @@ class Hand:
         Returns:
             Dict containing hand results (winners, pot distribution, etc.)
         """
-        self.logger.debug("Starting hand play")
         
         try:
-            # Reset players for new hand
             self._reset_players()
-            
-            # Assign positions and post blinds
             self._assign_positions()
             self._post_blinds()
-            
-            # Deal hole cards
             self._deal_hole_cards()
-            
-            # Debugging Statement:
-            for player in self.players:
-                self.logger.info(f'player: {player.name} : {player.position}')
             
             # Run betting rounds
             self._run_betting_round(Phase.PREFLOP)
@@ -128,14 +113,13 @@ class Hand:
 
     def _reset_players(self):
         """Reset all players for a new hand."""
-        self.logger.debug("Resetting players for new hand")
         for player in self.players:
             player.reset_for_new_hand()
         self.active_players = [p for p in self.players if p.is_playing]
 
     def _assign_positions(self):
         """Assign positions to players based on dealer index."""
-        self.logger.info("Assigned Player Positions")
+        self.logger.info("=== Player Positions ===")
         
         # Get players who are playing
         active_players = [p for p in self.players if p.is_playing]
@@ -165,7 +149,8 @@ class Hand:
             player = seat_to_player_map[seat_index]
             player.position = position_names[idx]
             players_in_position_order.append(player)
-            self.logger.info(f"Player {player.name}    {player.position}")
+            self.logger.info(f"Player: '{player.name}' -> Position: {player.position}")
+        self.logger.info('=========================\n')
         
         # for use of blinds, betting, etc.        
         self.players_in_position_order = players_in_position_order
@@ -173,7 +158,6 @@ class Hand:
 
     def _post_blinds(self, sb_amount=None, bb_amount=None):
         """Post small and big blinds."""
-        self.logger.debug("Posting blinds")
         if not hasattr(self, 'players_in_position_order'):
             raise RuntimeError("Positions must be assigned before posting blinds.")
         if sb_amount is None:
@@ -200,16 +184,13 @@ class Hand:
         bb_player.current_bet += bb_paid
 
         self.pot += bb_paid + sb_paid
-        self.logger.debug(f"Blinds posted: SB={sb_paid}, BB={bb_paid}, Total pot={self.pot}")
+        
         self.blinds_posted = True
 
     def _deal_hole_cards(self):
         """Deal two hole cards to each active player."""
-        self.logger.debug("Dealing hole cards")
         for player in self.active_players:
             player.hole_cards = tuple(self.deck.draw(2))
-            self._log_action(player, "DEALT_HOLE_CARDS", amount=None, 
-                           details=f"Cards: {player.hole_cards}")
 
     def _deal_flop(self):
         """Deal the flop (three community cards)."""
@@ -268,23 +249,22 @@ class Hand:
 
     def _run_betting_round(self, phase: Phase):
         """Run a simple betting round for the given phase."""
-        self.logger.debug(f"Running betting round for phase: {phase.name}")
         self.phase = phase
-        
-        # Reset betting state for new round
         self._reset_betting_state()
 
         # Determine action order
         if phase == Phase.PREFLOP:
             action_order = self._get_preflop_action_order()
-            self.logger.info('Using preflop action order...')
-            for p in action_order:
-                self.logger.info(f'{p.name} : {p.position}')
         else:
             action_order = self._get_postflop_action_order()
-            self.logger.info('Using postflop action order:')
-            for p in action_order:
-                self.logger.info(f'{p.name} : {p.position}')
+        self.logger.debug(f'action order...')
+        for p in action_order:
+            self.logger.debug(f'{p.name} {p.position}')
+
+        # Print initial state for this betting round
+        self.logger.info(f'                                                                                    {phase.name.capitalize()}')
+        self.logger.info(f'-----------------------------------------------------------------------------------------------')
+        self._print_game_state_debug()
 
         for player in action_order:
             player.has_acted = False  # Track if player has acted this round
@@ -325,6 +305,7 @@ class Hand:
                 player.has_folded = True
                 self._log_action(player, "FOLD", amount=None)
                 self.logger.debug(f"{player.name} folds.")
+                self._print_game_state_debug(player, action, None)
             elif action == Action.CALL or (action == Action.CHECK and amount_to_call == 0):
                 call_amt = min(amount_to_call, player.stack)
                 player.stack -= call_amt
@@ -334,6 +315,7 @@ class Hand:
                 self._log_action(player, "CALL" if action == Action.CALL else "CHECK", amount=call_amt)
                 self.logger.debug(f"{player.name} {'calls' if action == Action.CALL else 'checks'} {call_amt}.")
                 self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
+                self._print_game_state_debug(player, action, call_amt)
             elif action == Action.RAISE:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
                 total_bet = amount
@@ -355,6 +337,7 @@ class Hand:
                 self._log_action(player, "RAISE", amount=bet_amt)
                 self.logger.debug(f"{player.name} raises to {player.current_bet}.")
                 self.logger.debug(f"Raise amount: {additional_bet}, last_raise_amount: {self.last_raise_amount}")
+                self._print_game_state_debug(player, action, total_bet)
                 
                 # Rebuild using the original action order, but reorder to continue from next player
                 remaining_players = [
@@ -390,6 +373,7 @@ class Hand:
                 
                 self._log_action(player, "BET", amount=bet_amt)
                 self.logger.debug(f"{player.name} bets {player.current_bet}.")
+                self._print_game_state_debug(player, action, total_bet)
                 
                 # Rebuild players_yet_to_act similar to RAISE
                 remaining_players = [
@@ -482,37 +466,6 @@ class Hand:
         else:
             raise ValueError("No single winner found for pot award")
 
-    def _log_action(self, player: Optional[Player], action: str, 
-                   amount: Optional[float], details: Optional[str] = None):
-        """
-        Log an action in structured format for ML/analysis.
-        
-        Args:
-            player: Player who took the action (None for system actions)
-            action: Type of action
-            amount: Amount involved in the action
-            details: Additional details about the action
-        """
-        log_entry = {
-            "player": player.name if player else None,
-            "action": action,
-            "amount": amount,
-            "phase": self.phase.name,
-            "pot": self.pot,
-            "community_cards": [str(card) for card in self.community_cards],
-            "details": details
-        }
-        
-        if player:
-            log_entry.update({
-                "player_stack": player.stack,
-                "player_position": player.position
-            })
-        
-        self.action_log.append(log_entry)
-        self.logger.debug(f"Action logged: {log_entry}")
-        self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
-
     def get_hand_summary(self) -> Dict:
         """Get a summary of the hand for analysis."""
         return {
@@ -555,13 +508,10 @@ class Hand:
         }
 
     def _reset_betting_state(self):
-        """Reset betting state for a new betting round."""
-        # Only reset to big blind at the start of the hand (preflop)
+        """At the start of a new hand, resets the minimum raise to the minimum raise"""
         if self.phase == Phase.PREFLOP:
             self.last_raise_amount = self.big_blind
-        # Otherwise, carry over the last raise amount (do not reset to 0)
         self.current_round_raises = []
-        self.logger.debug("Reset betting state for new round")
 
     def _get_valid_actions(self, player, amount_to_call, highest_bet):
         """Return valid actions and amounts for current player."""
@@ -681,7 +631,7 @@ class Hand:
             
             self.logger.info(f"VALIDATION: player={player.name}, current_bet={player_current_bet}, "
                              f"amount={amount}, raise_increment={raise_increment}, "
-                             f"last_raise_amount={self.last_raise_amount}, min_raise={self.min_raise}")
+                             f"last_raise_amount={self.last_raise_amount}")
             
             # Check minimum raise rule
             if self.last_raise_amount > 0:
@@ -712,3 +662,51 @@ class Hand:
             return Action.CALL, None
         else:
             return Action.FOLD, None
+
+    def _print_game_state_debug(self, player=None, action=None, amount=None):
+        """
+        Print a formatted game state summary for debugging.
+        """
+        # 1. Player Action Summary
+        if player and action:
+            if action == Action.RAISE:
+                action_str = f"raises to ${amount:.2f}"
+            elif action == Action.BET:
+                action_str = f"bets ${amount:.2f}"
+            elif action == Action.CALL:
+                action_str = f"calls ${amount:.2f}"
+            elif action == Action.CHECK:
+                action_str = "checks"
+            elif action == Action.FOLD:
+                action_str = "folds"
+            elif action == Action.ALL_IN:
+                action_str = f"all-in ${amount:.2f}"
+            else:
+                action_str = action.name.lower()
+            self.logger.info(f"[{self.phase.name}] {player.name} ({player.position}) {action_str}")
+        elif player:
+            # For system actions like blinds
+            self.logger.info(f"[{self.phase.name}] {player.name} ({player.position}) posts ${player.pot_contrib:.2f}")
+
+        # 2. Current Pot
+        self.logger.info(f"Pot: ${self.pot:.2f}")
+
+        # 3. Player Contributions
+        contributions = [f"{p.name}: ${p.pot_contrib:.2f}" for p in self.players_in_position_order if p.pot_contrib > 0]
+        if contributions:
+            self.logger.info(f"Contributions: {', '.join(contributions)}")
+
+        # 4. Minimum Raise Amount (if applicable)
+        if hasattr(self, 'last_raise_amount') and self.last_raise_amount > 0:
+            self.logger.info(f"Min Raise: ${self.last_raise_amount:.2f}")
+
+        # 5. Player Stack States (show if any stack is low or big difference)
+        stacks = [p.stack for p in self.players_in_position_order]
+        min_stack = min(stacks)
+        max_stack = max(stacks)
+        if max_stack - min_stack > 5.0 or min_stack < 10.0:
+            stack_strs = [f"{p.name}: ${p.stack:.2f}" for p in self.players_in_position_order]
+            self.logger.info(f"Stacks: {', '.join(stack_strs)}")
+
+        # Blank line for readability
+        self.logger.info("")
