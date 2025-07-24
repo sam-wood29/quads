@@ -9,6 +9,7 @@ from quads.deuces import Card, Deck, Evaluator
 from quads.engine.extras import Action, Phase, POSITIONS_BY_PLAYER_COUNT
 from quads.engine.logging_utils import setup_logger
 from quads.engine.player import Player
+from pprint import pformat
 import logging
 
 
@@ -47,14 +48,14 @@ class Hand:
         self.big_blind = big_blind
         self.dealer_index = dealer_index
         self.logger = logger or setup_logger(f"hand_{hand_id}" if hand_id else "hand")
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
         self.hand_id = hand_id
         
         # Betting structure
         self.min_raise = min_raise  # Custom min raise (None = use big blind)
         self.max_raise = max_raise  # None for no limit
         self.betting_increments = betting_increments  # 'none', 'big_blind', 'small_blind'
-        self.last_raise_amount = 0  # Track last raise for min-raise rule
+        self.last_raise_increment = 0  # Track last raise for min-raise rule
         self.current_round_raises = []  # Track all raises in current round
         
         # Hand state
@@ -198,8 +199,6 @@ class Hand:
         self.deck.draw(1)  # Burn card
         self.community_cards = self.deck.draw(3)
         self.phase = Phase.FLOP
-        self._log_action(None, "DEALT_FLOP", amount=None, 
-                        details=f"Flop: {self.community_cards}")
 
     def _deal_turn(self):
         """Deal the turn (fourth community card)."""
@@ -274,7 +273,6 @@ class Hand:
 
         while players_yet_to_act:
             player = players_yet_to_act.pop(0)
-            self.logger.info(f'{player.name} is acting player....')
             if player.has_folded or player.stack == 0:
                 continue
             # Calculate amount to call
@@ -286,58 +284,53 @@ class Hand:
             # Pass valid actions to controller
             game_state = self._get_game_state(player, amount_to_call)
             game_state['valid_actions'] = valid_actions
-            
-            # Log valid actions for debugging
-            self.logger.debug(f"Valid actions for {player.name}: {valid_actions['actions']}")
-            if Action.RAISE in valid_actions['actions']:
-                self.logger.debug(f"Raise range: {valid_actions['min_raise']} to {valid_actions['max_raise']}")
 
             # Ask controller for action
             action, amount = player.controller.decide(player, game_state)
             
             # Validate action
-            if not self._validate_action(action, amount, valid_actions, player):
+            if not self._validate_action(action, amount, valid_actions, player, highest_bet):
                 self.logger.error(f"Invalid action {action} with amount {amount} from {player.name}")
                 action, amount = self._handle_invalid_action(player, valid_actions)
 
             # Apply action
             if action == Action.FOLD:
                 player.has_folded = True
-                self._log_action(player, "FOLD", amount=None)
                 self.logger.debug(f"{player.name} folds.")
-                self._print_game_state_debug(player, action, None)
             elif action == Action.CALL or (action == Action.CHECK and amount_to_call == 0):
                 call_amt = min(amount_to_call, player.stack)
                 player.stack -= call_amt
                 player.current_bet += call_amt
+                player.pot_contrib += call_amt
                 self.pot += call_amt
                 self.logger.debug(f"Call: player={player.name}, amount_to_call={amount_to_call}, call_amt={call_amt}, pot={self.pot}")
-                self._log_action(player, "CALL" if action == Action.CALL else "CHECK", amount=call_amt)
+                
                 self.logger.debug(f"{player.name} {'calls' if action == Action.CALL else 'checks'} {call_amt}.")
                 self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
                 self._print_game_state_debug(player, action, call_amt)
-            elif action == Action.RAISE:
+            elif action == Action.RAISE or Action.BET:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
-                total_bet = amount
+                total_bet = amount 
                 additional_bet = total_bet - player.current_bet
-                bet_amt = min(additional_bet, player.stack)
+                player_bet_increment = min(additional_bet, player.stack)
                 
                 previous_highest_bet = highest_bet  # Save before updating
-                player.stack -= bet_amt
-                player.current_bet += bet_amt
-                self.pot += bet_amt
+                player.stack -= player_bet_increment
+                player.current_bet += player_bet_increment
+                player.pot_contrib += player_bet_increment
+                self.pot += player_bet_increment
                 highest_bet = player.current_bet
                 
+                # Player should not be able to raise if cannot cover, therefore I do not 
+                # Update last raise amount if the player covers. this block is confusing
                 # Only update last_raise_amount if this is a full raise (not an all-in for less)
-                if bet_amt == (total_bet - player.current_bet + bet_amt):  # Player covered the full raise
-                    self.last_raise_amount = total_bet - previous_highest_bet
+                if player_bet_increment == (total_bet - player.current_bet + player_bet_increment):  # Player covered the full raise
+                    self.last_raise_increment = total_bet - previous_highest_bet
                 # Otherwise, do not update last_raise_amount (all-in for less)
-                self.current_round_raises.append(self.last_raise_amount)
+                self.current_round_raises.append(self.last_raise_increment)
                 
-                self._log_action(player, "RAISE", amount=bet_amt)
                 self.logger.debug(f"{player.name} raises to {player.current_bet}.")
-                self.logger.debug(f"Raise amount: {additional_bet}, last_raise_amount: {self.last_raise_amount}")
-                self._print_game_state_debug(player, action, total_bet)
+                self.logger.debug(f"Raise amount: {additional_bet}, last_raise_amount: {self.last_raise_increment}")
                 
                 # Rebuild using the original action order, but reorder to continue from next player
                 remaining_players = [
@@ -355,44 +348,13 @@ class Hand:
                     check_player = action_order[check_index]
                     if check_player in remaining_players:
                         players_yet_to_act.append(check_player)
-            elif action == Action.BET:
-                # BET is the same as RAISE when no one has bet yet
-                total_bet = amount
-                bet_amt = min(total_bet, player.stack)
-                
-                player.stack -= bet_amt
-                player.current_bet += bet_amt
-                self.pot += bet_amt
-                highest_bet = player.current_bet
-
-                # Only update last_raise_amount if this is a full bet (not an all-in for less)
-                if bet_amt == total_bet:
-                    self.last_raise_amount = bet_amt
-                # Otherwise, do not update last_raise_amount (all-in for less)
-                self.current_round_raises.append(self.last_raise_amount)
-                
-                self._log_action(player, "BET", amount=bet_amt)
-                self.logger.debug(f"{player.name} bets {player.current_bet}.")
-                self._print_game_state_debug(player, action, total_bet)
-                
-                # Rebuild players_yet_to_act similar to RAISE
-                remaining_players = [
-                    p for p in action_order
-                    if not p.has_folded and p.stack > 0 and p != player and p.current_bet < highest_bet
-                ]
-                
-                raiser_index = action_order.index(player)
-                players_yet_to_act = []
-                for i in range(len(action_order)):
-                    check_index = (raiser_index + 1 + i) % len(action_order)
-                    check_player = action_order[check_index]
-                    if check_player in remaining_players:
-                        players_yet_to_act.append(check_player)
+            
             else:
                 # logic for 'Bet' is unknown. it in theory is the same as 'Raise', but first.
                 self.logger.warning(f"Unknown action {action} from {player.name}")
 
             player.has_acted = True
+            self._debug_player_action(player=player, action=action, amount_to_call=amount_to_call, total_bet=total_bet, highest_bet=highest_bet)
 
             # End round if only one player remains
             active_players = [p for p in self.players_in_position_order if not p.has_folded and p.stack > 0]
@@ -403,6 +365,21 @@ class Hand:
         # Reset current_bet for all players for the next round
         for player in self.players_in_position_order:
             player.current_bet = 0
+    def _debug_player_action(self, player, action, amount_to_call, highest_bet, total_bet):
+        self.logger.debug(f"\n--- {player.name}'s action ---")
+        match action:
+            case Action.FOLD:
+                self.logger.debug(f"{player.name} folds")
+            case Action.CHECK:
+                self.logger.debug(f"{player.name} checks")
+            case Action.CALL:
+                self.logger.debug(f"{player.name} calls raise of ${highest_bet}; (${amount_to_call} more)")
+            case Action.RAISE:
+                self.logger.debug(f"{player.name} raises to {total_bet}")
+            case _:
+                raise ValueError('Unsupported Action')
+        self.logger.debug(f"\n--- {player.name}'s state ---")
+        self.logger.debug(pformat(vars(player), width=20))
 
     def _should_continue(self) -> bool:
         """Check if the hand should continue to the next street."""
@@ -510,7 +487,7 @@ class Hand:
     def _reset_betting_state(self):
         """At the start of a new hand, resets the minimum raise to the minimum raise"""
         if self.phase == Phase.PREFLOP:
-            self.last_raise_amount = self.big_blind
+            self.last_raise_increment = self.big_blind
         self.current_round_raises = []
 
     def _get_valid_actions(self, player, amount_to_call, highest_bet):
@@ -561,17 +538,14 @@ class Hand:
 
     def _calculate_min_raise(self, highest_bet):
         """Calculate minimum raise amount."""
-        self.logger.info(f'self.last_raise_amount: {self.last_raise_amount}')
-        self.logger.info(f'highest bet: {highest_bet}')
-        if self.last_raise_amount == 0:
+        if self.last_raise_increment == 0:
             # First raise of the round (unopened pot)
             # Use big blind as minimum raise if min_raise is not set
             min_raise_amount = self.min_raise if self.min_raise is not None else self.big_blind
             min_raise = highest_bet + min_raise_amount
         else:
             # Subsequent raises must be at least the size of the last raise
-            min_raise = highest_bet + self.last_raise_amount
-        self.logger.info(f'min raise: {min_raise}')
+            min_raise = highest_bet + self.last_raise_increment
         return min_raise
 
     def _calculate_max_raise(self, player, highest_bet):
@@ -619,37 +593,37 @@ class Hand:
         else:  # 'none'
             return True  # No increment rule
 
-    def _validate_action(self, action, amount, valid_actions, player):
+    def _validate_action(self, action, amount, valid_actions, player, highest_bet):
+        # Good Enough
         """Validate that the action is legal."""
+        # Good.
         if action not in valid_actions['actions']:
             self.logger.debug(f"Action {action} not in valid actions: {valid_actions['actions']}")
             return False
-        
+        # Good
         if action == Action.RAISE:
             player_current_bet = player.current_bet
-            raise_increment = amount - player_current_bet
+            raise_increment = amount - highest_bet
             
             self.logger.info(f"VALIDATION: player={player.name}, current_bet={player_current_bet}, "
                              f"amount={amount}, raise_increment={raise_increment}, "
-                             f"last_raise_amount={self.last_raise_amount}")
+                             f"last_raise_amount={self.last_raise_increment}")
             
-            # Check minimum raise rule
-            if self.last_raise_amount > 0:
-                if raise_increment < self.last_raise_amount:
-                    self.logger.info(f"INVALID RAISE: {raise_increment} < {self.last_raise_amount}")
+            # Good
+            if self.last_raise_increment > 0:
+                if raise_increment < self.last_raise_increment:
+                    self.logger.info(f"INVALID RAISE (raise increment must be bigger than previous raisee increment.): {raise_increment} < {self.last_raise_increment}")
                     return False
             else:
                 min_raise_amount = self.min_raise if self.min_raise is not None else self.big_blind
                 if raise_increment < min_raise_amount:
-                    self.logger.info(f"INVALID FIRST RAISE: {raise_increment} < {min_raise_amount}")
+                    self.logger.info(f"INVALID (Raise increment not larger than min raise.): {raise_increment} < {min_raise_amount}")
                     return False
             
             # Check betting increment rule
             if not self._validate_betting_increment(amount):
                 self.logger.info(f"INVALID BETTING INCREMENT: {amount} doesn't follow {self.betting_increments} rule")
                 return False
-            
-            self.logger.info(f"VALID RAISE: {raise_increment}")
         
         return True
 
@@ -667,28 +641,6 @@ class Hand:
         """
         Print a formatted game state summary for debugging.
         """
-        # 1. Player Action Summary
-        if player and action:
-            if action == Action.RAISE:
-                action_str = f"raises to ${amount:.2f}"
-            elif action == Action.BET:
-                action_str = f"bets ${amount:.2f}"
-            elif action == Action.CALL:
-                action_str = f"calls ${amount:.2f}"
-            elif action == Action.CHECK:
-                action_str = "checks"
-            elif action == Action.FOLD:
-                action_str = "folds"
-            elif action == Action.ALL_IN:
-                action_str = f"all-in ${amount:.2f}"
-            else:
-                action_str = action.name.lower()
-            self.logger.info(f"[{self.phase.name}] {player.name} ({player.position}) {action_str}")
-        elif player:
-            # For system actions like blinds
-            self.logger.info(f"[{self.phase.name}] {player.name} ({player.position}) posts ${player.pot_contrib:.2f}")
-
-        # 2. Current Pot
         self.logger.info(f"Pot: ${self.pot:.2f}")
 
         # 3. Player Contributions
@@ -697,8 +649,8 @@ class Hand:
             self.logger.info(f"Contributions: {', '.join(contributions)}")
 
         # 4. Minimum Raise Amount (if applicable)
-        if hasattr(self, 'last_raise_amount') and self.last_raise_amount > 0:
-            self.logger.info(f"Min Raise: ${self.last_raise_amount:.2f}")
+        if hasattr(self, 'last_raise_amount') and self.last_raise_increment > 0:
+            self.logger.info(f"Min Raise: ${self.last_raise_increment:.2f}")
 
         # 5. Player Stack States (show if any stack is low or big difference)
         stacks = [p.stack for p in self.players_in_position_order]
