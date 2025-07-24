@@ -59,3 +59,16 @@ class Player:
         self.current_bet = 0.0
         self.pot_contrib = 0.0
         self.hole_cards = None  # Will be dealt by Hand class
+    
+    def _get_summary_helper(self):
+        summary_dict =  {
+            "has_acted": self.has_acted,
+            "has_folded": self.has_folded,
+            "id": self.id,
+            "seat_index": self.seat_index,
+            "position": self.position,
+            "current_bet": self.current_bet,
+            "pot_contrib": self.pot_contrib,
+            "stack": self.stack
+        }
+        return summary_dict

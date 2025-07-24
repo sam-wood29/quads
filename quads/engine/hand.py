@@ -379,7 +379,8 @@ class Hand:
             case _:
                 raise ValueError('Unsupported Action')
         self.logger.debug(f"\n--- {player.name}'s state ---")
-        self.logger.debug(pformat(vars(player), width=20))
+        summary_dict = player._get_summary_helper()
+        self.logger.debug(pformat(summary_dict, width=20))
 
     def _should_continue(self) -> bool:
         """Check if the hand should continue to the next street."""
@@ -662,3 +663,4 @@ class Hand:
 
         # Blank line for readability
         self.logger.info("")
+        
