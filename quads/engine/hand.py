@@ -206,8 +206,6 @@ class Hand:
         self.deck.draw(1)  # Burn card
         self.community_cards.append(self.deck.draw(1))
         self.phase = Phase.TURN
-        self._log_action(None, "DEALT_TURN", amount=None, 
-                        details=f"Turn: {self.community_cards[-1]}")
 
     def _deal_river(self):
         """Deal the river (fifth community card)."""
@@ -215,8 +213,6 @@ class Hand:
         self.deck.draw(1)
         self.community_cards.append(self.deck.draw(1))
         self.phase = Phase.RIVER
-        self._log_action(None, "DEALT_RIVER", amount=None, 
-                        details=f"River: {self.community_cards[-1]}")
 
     def _get_preflop_action_order(self):
         num_players = len(self.players_in_position_order)
@@ -297,6 +293,7 @@ class Hand:
             if action == Action.FOLD:
                 player.has_folded = True
                 self.logger.debug(f"{player.name} folds.")
+                total_bet = None
             elif action == Action.CALL or (action == Action.CHECK and amount_to_call == 0):
                 call_amt = min(amount_to_call, player.stack)
                 player.stack -= call_amt
@@ -308,6 +305,7 @@ class Hand:
                 self.logger.debug(f"{player.name} {'calls' if action == Action.CALL else 'checks'} {call_amt}.")
                 self.logger.info(f"Pot after {player.name if player else 'system'} {action}: {self.pot}")
                 self._print_game_state_debug(player, action, call_amt)
+                total_bet = None
             elif action == Action.RAISE or Action.BET:
                 # For simplicity, treat amount as the total bet (not just the raise increment)
                 total_bet = amount 
@@ -354,7 +352,16 @@ class Hand:
                 self.logger.warning(f"Unknown action {action} from {player.name}")
 
             player.has_acted = True
-            self._debug_player_action(player=player, action=action, amount_to_call=amount_to_call, total_bet=total_bet, highest_bet=highest_bet)
+            self._debug_player_action(player=player, action=action, amount_to_call=amount_to_call, 
+                                      total_bet=total_bet,
+                                      highest_bet=highest_bet)
+            
+            self.logger.debug(f"\nplayers yet to act: {[p.name for p in players_yet_to_act]}")
+            self.logger.debug(f"pot: ${self.pot}")
+            contributions = [f"{p.name}: ${p.pot_contrib:.2f}" for p in self.players_in_position_order if p.pot_contrib > 0]
+            if contributions:
+                self.logger.info(f"Contributions: {', '.join(contributions)}")
+            
 
             # End round if only one player remains
             active_players = [p for p in self.players_in_position_order if not p.has_folded and p.stack > 0]
@@ -365,6 +372,7 @@ class Hand:
         # Reset current_bet for all players for the next round
         for player in self.players_in_position_order:
             player.current_bet = 0
+    
     def _debug_player_action(self, player, action, amount_to_call, highest_bet, total_bet):
         self.logger.debug(f"\n--- {player.name}'s action ---")
         match action:
