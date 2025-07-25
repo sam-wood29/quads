@@ -10,6 +10,7 @@ from quads.engine.extras import Action, Phase, POSITIONS_BY_PLAYER_COUNT
 from quads.engine.logging_utils import setup_logger
 from quads.engine.player import Player
 from pprint import pformat
+import math
 import logging
 
 
@@ -195,7 +196,6 @@ class Hand:
 
     def _deal_flop(self):
         """Deal the flop (three community cards)."""
-        self.logger.debug("Dealing flop")
         self.deck.draw(1)  # Burn card
         self.community_cards = self.deck.draw(3)
         self.phase = Phase.FLOP
@@ -253,8 +253,8 @@ class Hand:
         else:
             action_order = self._get_postflop_action_order()
         self.logger.debug(f'action order...')
-        for p in action_order:
-            self.logger.debug(f'{p.name} {p.position}')
+        # for p in action_order:
+        #     self.logger.debug(f'{p.name} {p.position}')
 
         # Print initial state for this betting round
         self.logger.info(f'                                                                                    {phase.name.capitalize()}')
@@ -402,27 +402,34 @@ class Hand:
 
     def _showdown(self) -> Dict:
         """Determine winners and distribute pot."""
-        self.logger.debug("Starting showdown")
         self.phase = Phase.SHOWDOWN
+        phase = self.phase
+        self.logger.info(f'                                                                                    {phase.name.capitalize()}')
+        self.logger.info(f'-----------------------------------------------------------------------------------------------')
 
         # 1. Get all players who haven't folded
         eligible_players = [p for p in self.players_in_position_order if not p.has_folded]
 
         # 2. Evaluate each player's hand
         evaluator = Evaluator()
-        hand_scores = {}
+        showdown_dict = {}
         for player in eligible_players:
-            # Combine hole cards and community cards
-            player_hand = list(player.hole_cards) + list(self.community_cards)
-            # Convert to integer representation if needed
-            # (Assume player_hand is already in the right format for Evaluator)
             score = evaluator.evaluate(list(player.hole_cards), list(self.community_cards))
-            hand_scores[player] = score
+            class_rank = evaluator.get_rank_class(score)
+            hand_name = evaluator.class_to_string(class_rank)
+        
+            showdown_dict[player] = {
+                'score': score,
+                'hand_name': hand_name,
+                'class_rank': class_rank
+            }    
+            self.logger.debug(f'{player.name}: score: {score}, hand name: {hand_name}, hand_class rank {class_rank}')
             self.logger.debug(f"{player.name} hand score: {score}")
 
         # 3. Find the best score (lower is better in Cactus Kev's system)
-        best_score = min(hand_scores.values())
-        winners = [p for p, score in hand_scores.items() if score == best_score]
+        best_score = min(showdown_dict.values())
+        winners = [p for p, score in showdown_dict.items() if score == best_score]
+        
 
         # 4. Split the pot among winners
         pot_share = self.pot / len(winners)
@@ -433,12 +440,11 @@ class Hand:
             self.logger.debug(f"{winner.name} wins {pot_share}")
 
         # 5. Log the showdown
-        self._log_action(None, "SHOWDOWN", amount=self.pot, details=f"Winners: {[w.name for w in winners]}")
 
         return {
             "winners": winners,
             "pot_distribution": pot_distribution,
-            "hand_scores": {p.name: hand_scores[p] for p in winners}
+            "hand_scores": {p.name: showdown_dict[p] for p in winners}
         }
 
     def _award_pot_to_last_player(self) -> Dict:
@@ -671,4 +677,10 @@ class Hand:
 
         # Blank line for readability
         self.logger.info("")
-        
+    
+    def distribute_pot(self, pot: float, winners: list[Player]):
+        chip_unit = self.small_blind
+        n = len(winners)
+        base_share = math.floor((pot / n) / chip_unit) * chip_unit
+        print(base_share)
+            
