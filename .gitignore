@@ -21,3 +21,6 @@ __pycache__/
 
 # some markdown files
 *.md
+
+# database
+*.db

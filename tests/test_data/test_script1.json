@@ -1,0 +1,25 @@
+{   
+    "script_name": "test_script1.json",
+    "rebuy_setting": "one_left",
+    "same_stack": true,
+    "stack_amount": 20,
+    "small_blind": 0.25,
+    "big_blind": 0.5,
+    "players": [
+        { "id": 1, "status": "exists" },
+        { "id": 2, "status": "exists" },
+        { "id": 3, "status": "exists" },
+        { "id": 4, "status": "exists" },
+        { "id": 5, "status": "exists" },
+        { "id": 6, "status": "exists" }
+    ],
+    "script": [
+        {
+            "type": "aciton",
+            "player": "p1",
+            "action": "raise",
+            "amount": 1.0
+        }
+
+    ]
+}   

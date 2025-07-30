@@ -1,25 +1,10 @@
-from quads.engine.logging_utils import setup_logger
+""" Some quick tests I wrote to understand the deuces library better. """
+
 from quads.deuces import Card, Deck
 from quads.deuces.lookup import LookupTable
+from quads.engine.logger import get_logger
 
-logger = setup_logger(name=__name__,
-                      log_file='logs/t.log')
-logger.info('yahoo a logger was setup in record timing this time.')
-
-def test_logger():
-    """
-    There is a more effecient way to read a line in the file, 
-    that i am not going to worry about.
-    """
-    with open(
-        file="logs/t.log",
-        mode='r',
-    ) as f:
-        lines = f.readlines()
-        raw_line = lines[0].strip() if lines else None
-        raw_line = repr(raw_line)
-        my_slice = raw_line[-6:-1]
-        assert my_slice == 'time.'
+logger = get_logger(__name__)
 
 class TestCard:
     def test_card_one(self):
@@ -47,7 +32,7 @@ class TestCard:
         output = Card.int_to_pretty_str(card)
         assert isinstance(output, str)
 
-        logger.info(f'bitcount: {bit_count}\n'
+        logger.debug(f'bitcount: {bit_count}\n'
                     f'card bit lenght: {card.bit_length()}\n'
                     f'rank_int: {Card.get_rank_int(card)}\n'
                     f'suit_int: {Card.get_suit_int(card)}\n'
@@ -67,7 +52,7 @@ class TestCard:
         sorted_hand = sorted(hand)
         assert set(hand) == set(sorted_hand)
         pretty_str_hand = [Card.int_to_pretty_str(card) for card in hand]
-        logger.info(f'pretty hand: {Card.print_pretty_cards(hand)}\n'
+        logger.debug(f'pretty hand: {Card.print_pretty_cards(hand)}\n'
                     f'pretty sorted hand: {Card.print_pretty_cards(sorted_hand)}\n'
                     'Another fun...\n'
                     f'pretty_str: {pretty_str_hand}')
@@ -78,13 +63,13 @@ class TestDeck:
         deck = Deck()
         sorted_cards = sorted(deck.cards)
         readable_cards = [Card.int_to_str(card) for card in sorted_cards]
-        logger.info(f'readable cards: \n\n{readable_cards}')
+        logger.debug(f'readable cards: \n\n{readable_cards}')
         assert len(set(deck.cards)) == 52
         deck2 = Deck()
         # decks are same, deck.cards aren't
         assert deck.cards != deck2.cards
         hand = deck.draw(2)
-        logger.info(f'hand: {[Card.int_to_str(c) for c in hand]}')
+        logger.debug(f'hand: {[Card.int_to_str(c) for c in hand]}')
         for card in hand:
             # .draw returns encoded card (int)
             assert isinstance(card, int)
