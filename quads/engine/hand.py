@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional
 from collections import deque
 import sqlite3
+from quads.deuces.card import Card
 
 class RaiseSetting(Enum):
     STANDARD = "standard"
@@ -32,18 +33,21 @@ class ActionType(str, Enum):
 
 class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
-                  script: Optional[dict] = None, raise_settings: RaiseSetting = RaiseSetting.STANDARD, 
-                  small_blind: float = 0.25, big_blind: float = 0.50):
+                  conn: sqlite3.Connection, script: Optional[dict] = None, 
+                  raise_settings: RaiseSetting = RaiseSetting.STANDARD, small_blind: float = 0.25, 
+                  big_blind: float = 0.50, script_index: Optional[int] = None):
         self.players = players
         self.id = id
         self.deck = deck
         self.dealer_index = dealer_index
         self.game_session_id = game_session_id
+        self.conn = conn
         self.script = script
         self.raise_settings = raise_settings
         self.deck = deck
         self.small_blind = small_blind
         self.big_blind = big_blind
+        self.script_index = script_index
         self.pot = 0.0
         self.step_number = 1
         self.phase: Phase
@@ -63,7 +67,7 @@ class Hand:
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
-        self._post_blinds() # if want to return something here in future, put in in the action db table.
+        self._post_blinds()
         
         
     def play_manual(self):
@@ -139,22 +143,43 @@ class Hand:
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
         self.pot += (bb_paid + sb_paid)
-        sb_action_logged = _log_action_in_db(conn=get_conn(), hand=self, player=sb_player, action=ActionType.POST_SMALL_BLIND, 
+        sb_action_logged = _log_action_in_db(hand=self, player=sb_player, action=ActionType.POST_SMALL_BLIND, 
                                              amount=sb_paid, phase=self.phase, cards=None, detail=None)
-        bb_action_logged = _log_action_in_db(conn=get_conn(), hand=self, player=bb_player, action=ActionType.POST_BIG_BLIND, 
+        bb_action_logged = _log_action_in_db(hand=self, player=bb_player, action=ActionType.POST_BIG_BLIND, 
                                              amount=bb_paid, phase=self.phase, cards=None, detail=None)
         # In future going to pass conn throughout the entire hand.
         
-        
+    def _get_next_script_action(self):
+        if self.script_index >= len(self.script):
+            raise RuntimeError("No more scripted actions")
+        action = self.script[self.script_index]
+        self.script_index += 1
+        return action
         
     def _deal_hole_cards(self):
-        if self.script is not None:
-            print(f"dealing hole cards from script.")
-        else:
-            raise RuntimeError(f"Random deal not implemented yet.")
+        players = self.players_in_button_order
+        n = 1 % len(players)
+        rotated_players = players[n:] + players[:n]
+        for p in rotated_players:
+            if self.script is not None: # scripted game
+                script = self._get_next_script_action()
+                if p.id != int(script['player']):
+                    raise RuntimeError("Script / Game mismatch.")
+                card_strings = script['cards']
+                cards_for_db = ",".join(card_strings)
+                cards_for_player = Card.hand_to_binary(card_strings)
+            else:
+                card1 = self.deck.draw()
+                card2 = self.deck.draw()
+                cards_for_player = [card1, card2]
+                card_strings = [Card.int_to_str(card1), Card.int_to_str(card2)]
+                cards_for_db = ",".join(card_strings)
+            p.hole_cards = cards_for_player
+            _log_action_in_db(hand=self, player=p, action=ActionType.DEAL_HOLE, amount=None,
+                          phase=Phase.DEAL, cards=cards_for_db)
+            
     
 def _log_action_in_db(
-    conn: sqlite3.Connection,
     hand: Hand,
     player: Player,
     action: str,
@@ -164,6 +189,7 @@ def _log_action_in_db(
     detail: str = None
 ) -> bool:
     try:
+        conn = hand.conn
         cursor = conn.cursor()
         cursor.execute("""
                        INSERT INTO actions (game_session_id, hand_id, step_number, player_id, action, amount, phase, cards, detail, position)
@@ -182,7 +208,6 @@ def _log_action_in_db(
                     ))
         conn.commit()
         hand.step_number += 1
-        conn.close()
         return True
     except Exception as e:
         print(f"ERROR - failed to log action; error: {e}")

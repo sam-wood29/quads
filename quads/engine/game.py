@@ -32,11 +32,18 @@ class GameSession:
         self.logger = get_logger(__name__)
         if gametype == GameType.SCRIPTED and script is None:
             raise ValueError("A Script must be provided for this game type.")
+        self.conn = get_conn()
         self.session_id = self._create_game_session_in_db(data)
+        if self.script is not None:
+            self.script_index = 0
 
 
     def __str__(self) -> str:
         return f"{[p.__str__() for p in self.players]}\n{self.gametype}"
+    
+    def __del__(self):
+        if hasattr(self, 'conn'):
+            self.conn.close()
     
     def play(self):
         hand_id = 1
@@ -45,8 +52,11 @@ class GameSession:
         deck = self.deck
         script = self.script
         while keep_playing == True:
-            hand = Hand(players=players, id=hand_id, deck=deck, script=script, dealer_index=self.dealer_index, game_session_id=self.session_id)
+            hand = Hand(players=players, id=hand_id, deck=deck, script=script, 
+                        dealer_index=self.dealer_index, game_session_id=self.session_id,
+                        conn=self.conn)
             players, hand_id, deck, keep_playing, script, dealer_index = hand.play()
+        self.conn.close()
             
             
     def _create_game_session_in_db(self, data: dict, conn: sqlite3.Connection = get_conn()):
