@@ -97,7 +97,7 @@ def load_existing_players_by_id(player_list: list, same_stack: bool, stack_amoun
     rows = cursor.fetchall()
     conn.close()
     if is_script == True:
-        controller = Controller(controller_type=ControllerType.GLOBAL_SCRIPT)
+        controller = Controller(controller_type=ControllerType.SCRIPT)
     else:
         raise RuntimeError("Non Scripted play not implemented.")
     if same_stack == True:

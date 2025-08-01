@@ -230,14 +230,42 @@ class Hand:
         return va
             
         
-        
+    def _select_validate_action(self, ap: Player, valid_actions: dict):
+        if self.script is not None:
+            action = self._get_next_script_action()
+            if action["type"] == "action":
+                if not ap.id == action["player"]:
+                    raise ValueError ("Script mismatch.")
+                r_action = action["move"]
+                r_amount = action["amount"]
+            if action["type"] == 'test':
+                raise RuntimeError("test scipt 'Actions' not yet implemented.")
+        else:
+            raise RuntimeError("Unscripted play not implemented yet.")
+            # r_actions
+            # r_amount
+        match r_action:
+            case "check":
+                r_action = ActionType.CHECK
+            case "fold":
+                r_action = ActionType.FOLD
+            case "call":
+                r_action = ActionType.CALL
+            case "raise":
+                r_action = ActionType.RAISE
+                if r_amount not in valid_actions["raise_amounts"]:
+                    if self.script is not None:
+                        raise ValueError("Invalid raise amount in script.")
+        if r_action not in valid_actions["actions"]:
+            if self.script is not None:
+                raise ValueError("Invalid action in script")
+        return r_action, r_amount
     
-    def _get_player_action(self, acting_player: Player):
+    def _get_player_action(self, acting_player: Player, game_state: dict):
         ap = acting_player
         amount_to_call = self.highest_bet - ap.current_bet
         valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
-        print(valid_actions)
-        
+        s_action, s_amount = self._select_validate_action(player=ap,valid_actions=valid_actions)
     
     def _run_betting_round(self):
         if self.phase == Phase.PREFLOP:
