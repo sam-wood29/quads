@@ -14,6 +14,9 @@ def main():
     hand.players_in_button_order = hand._assign_positions()
     hand._post_blinds()
     hand._deal_hole_cards()
+    hand.phase = quads_hand.Phase.PREFLOP
+    hand._run_betting_round()
+    
     
 
 if __name__ == "__main__":

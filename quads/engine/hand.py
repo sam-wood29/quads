@@ -178,6 +178,77 @@ class Hand:
             _log_action_in_db(hand=self, player=p, action=ActionType.DEAL_HOLE, amount=None,
                           phase=Phase.DEAL, cards=cards_for_db)
             
+    def _get_betting_round_action_order(self):
+        players = self.players_in_button_order
+        num_players = len(players)
+        if num_players == 2:
+            if self.phase == Phase.PREFLOP:
+                players_in_order = [players[0], players[1]]
+            else:
+                players_in_order = [players[1], players[0]]
+        else:
+            if self.phase == Phase.PREFLOP:
+                last_player = next(p for p in players if p.position == quads_player.Position.BB)
+            else:
+                last_player = next(p for p in players if p.position == quads_player.Position.BUTTON)
+            idx = players.index(last_player)
+            next_idx = (idx + 1) % num_players
+            players_in_order = players[next_idx:] + players[:next_idx]
+        return players_in_order
+    
+    def _generate_raise_amounts(self, player: Player, min_raise, max_raise):
+        amounts = []
+        current = min_raise
+        step = self.small_blind
+        while current <= max_raise and current <= player.stack:
+            amounts.append(current)
+            current += step
+        return amounts
+    
+    def _get_valid_actions(self, player:Player, amount_to_call:float):
+        if self.raise_settings != RaiseSetting.STANDARD:
+            raise RuntimeError("Raise settings not implemented.")
+        va = {
+            'actions': [],
+            'raise_amounts': [],
+        }
+        va["actions"].append(ActionType.FOLD)
+        if amount_to_call > 0:
+            va["actions"].append(ActionType.CALL)
+        else:
+            va["actions"].append(ActionType.CHECK)
+        if player.stack > amount_to_call:
+            if self.last_raise_increment == 0:
+                min_raise_amount = self.big_blind
+                min_raise = self.highest_bet + min_raise_amount
+            else:
+                min_raise = self.highest_bet + self.last_raise_increment
+            max_raise = player.stack
+            if min_raise <= max_raise:
+                va["actions"].append(ActionType.RAISE)
+        va["raise_amounts"] = self._generate_raise_amounts(player=player, min_raise=min_raise, max_raise=max_raise)
+        return va
+            
+        
+        
+    
+    def _get_player_action(self, acting_player: Player):
+        ap = acting_player
+        amount_to_call = self.highest_bet - ap.current_bet
+        valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
+        print(valid_actions)
+        
+    
+    def _run_betting_round(self):
+        if self.phase == Phase.PREFLOP:
+            self.last_raise_increment = self.big_blind
+        action_order = self._get_betting_round_action_order()
+        self.highest_bet = max(p.current_bet for p in action_order)
+        players_yet_to_act = [p for p in action_order if not p.has_folded and p.stack > 0]
+        while players_yet_to_act:
+            acting_player = players_yet_to_act.pop(0)
+            self._get_player_action(acting_player)
+            
     
 def _log_action_in_db(
     hand: Hand,

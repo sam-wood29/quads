@@ -46,8 +46,8 @@
 
 -- ALTER TABLE actions ADD COLUMN position TEXT;
 
-DROP TABLE IF EXISTS actions;
-DELETE FROM sqlite_sequence WHERE name = 'players';
+-- DROP TABLE IF EXISTS actions;
+-- DELETE FROM sqlite_sequence WHERE name = 'players';
 
 CREATE TABLE IF NOT EXISTS actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
