@@ -143,11 +143,26 @@ class Hand:
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
         self.pot += (bb_paid + sb_paid)
-        sb_action_logged = _log_action_in_db(hand=self, player=sb_player, action=ActionType.POST_SMALL_BLIND, 
-                                             amount=sb_paid, phase=self.phase, cards=None, detail=None)
-        bb_action_logged = _log_action_in_db(hand=self, player=bb_player, action=ActionType.POST_BIG_BLIND, 
-                                             amount=bb_paid, phase=self.phase, cards=None, detail=None)
-        # In future going to pass conn throughout the entire hand.
+        conn = self.conn
+        game_session_id = self.game_session_id
+        hand_id = self.id
+        step_number = self.step_number
+        player = sb_player
+        action = ActionType.POST_SMALL_BLIND
+        amount = sb_paid
+        phase = Phase.DEAL
+        position = sb_player.position
+        sb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
+                   player=player, action=action, amount=amount, phase=phase, position=position)
+        self.step_number += 1
+        player=bb_player
+        action=ActionType.POST_BIG_BLIND
+        amount=bb_paid
+        position = bb_player.position
+        bb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
+                   player=player, action=action, amount=amount, phase=phase, position=position)
+        if not bb_logged or not sb_logged:
+            raise RuntimeError("Error entering blinds posted into db.")
         
     def _get_next_script_action(self):
         if self.script_index >= len(self.script):
@@ -175,8 +190,12 @@ class Hand:
                 card_strings = [Card.int_to_str(card1), Card.int_to_str(card2)]
                 cards_for_db = ",".join(card_strings)
             p.hole_cards = cards_for_player
-            _log_action_in_db(hand=self, player=p, action=ActionType.DEAL_HOLE, amount=None,
-                          phase=Phase.DEAL, cards=cards_for_db)
+            success = log_action(conn=self.conn, game_session_id=self.game_session_id, hand_id=self.id,
+                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE,
+                                 phase=Phase.DEAL, hole_cards=cards_for_db, )
+            self.step_number += 1
+            # _log_action_in_db(hand=self, player=p, action=ActionType.DEAL_HOLE, amount=None,
+            #               phase=Phase.DEAL, cards=cards_for_db)
             
     def _get_betting_round_action_order(self):
         players = self.players_in_button_order
@@ -278,36 +297,44 @@ class Hand:
             self._get_player_action(acting_player)
             
     
-def _log_action_in_db(
-    hand: Hand,
+def log_action(
+    conn: sqlite3.Connection,
+    game_session_id: int,
+    hand_id: int,
+    step_number: int,
     player: Player,
     action: str,
     amount: float = None,
     phase: str = None,
     cards: str = None,
+    hole_cards: str = None,
+    community_cards: str = None,
+    hand_rank: int = None,
+    hand_class: str = None,
+    pot_odds: float = None,
+    percent_stack_to_call: float = None,
+    amount_to_call: float = None,
+    highest_bet: float = None,
+    position: str = None,
     detail: str = None
 ) -> bool:
     try:
-        conn = hand.conn
-        cursor = conn.cursor()
+        cursor = conn
         cursor.execute("""
-                       INSERT INTO actions (game_session_id, hand_id, step_number, player_id, action, amount, phase, cards, detail, position)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        hand.game_session_id,
-                        hand.id, 
-                        hand.step_number, 
-                        player.id, 
-                        action, 
-                        amount, 
-                        hand.phase, 
-                        cards, 
-                        detail,
-                        str(player.position)
-                    ))
+            INSERT INTO actions (
+                game_session_id, hand_id, step_number, player_id, action, amount,
+                phase, cards, hole_cards, community_cards,
+                hand_rank, hand_class, pot_odds, percent_stack_to_call,
+                amount_to_call, highest_bet, position, detail
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            game_session_id, hand_id, step_number, player.id, action, amount,
+            phase, cards, hole_cards, community_cards,
+            hand_rank, hand_class, pot_odds, percent_stack_to_call,
+            amount_to_call, highest_bet, position, detail
+        ))
         conn.commit()
-        hand.step_number += 1
         return True
     except Exception as e:
-        print(f"ERROR - failed to log action; error: {e}")
+        print(f"ERROR - Failed to log action: {e}")
         return False

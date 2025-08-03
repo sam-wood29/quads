@@ -49,6 +49,24 @@
 -- DROP TABLE IF EXISTS actions;
 -- DELETE FROM sqlite_sequence WHERE name = 'players';
 
+-- CREATE TABLE IF NOT EXISTS actions (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT,
+--     game_session_id INTEGER NOT NULL,
+--     hand_id INTEGER NOT NULL,
+--     step_number INTEGER NOT NULL,
+--     player_id INTEGER,
+--     action TEXT NOT NULL,
+--     amount REAL,
+--     phase TEXT,
+--     cards TEXT,
+--     detail TEXT,
+--     position TEXT,
+--     FOREIGN KEY (game_session_id) REFERENCES game_sessions(id),
+--     FOREIGN KEY (player_id) REFERENCES players(id)
+-- );
+
+DROP TABLE actions;
+
 CREATE TABLE IF NOT EXISTS actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     game_session_id INTEGER NOT NULL,
@@ -59,8 +77,17 @@ CREATE TABLE IF NOT EXISTS actions (
     amount REAL,
     phase TEXT,
     cards TEXT,
-    detail TEXT,
+    hole_cards TEXT,
+    community_cards TEXT,
+    hand_rank INTEGER,
+    hand_class TEXT,
+    pot_odds REAL,
+    percent_stack_to_call REAL,
+    amount_to_call REAL,
+    highest_bet REAL,
     position TEXT,
+    detail TEXT,
     FOREIGN KEY (game_session_id) REFERENCES game_sessions(id),
+    FOREIGN KEY (hand_id) REFERENCES hands(id),
     FOREIGN KEY (player_id) REFERENCES players(id)
 );

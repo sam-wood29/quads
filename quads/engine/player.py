@@ -25,17 +25,17 @@ class Player:
     def __str__(self) -> str:
         return f"{self.id}, {self.name}, {self.stack}, {self.position}, {self.controller.controller_type}"
     
-class Position(Enum):
-    BUTTON = auto()
-    SB = auto()
-    BB = auto()
-    UTG = auto()
-    UTG1 = auto()
-    UTG2 = auto()
-    LJ = auto()
-    MP = auto()
-    HJ = auto()
-    CO = auto()
+class Position(str, Enum):
+    BUTTON = "button"
+    SB = "sb"
+    BB = "bb"
+    UTG = "utg"
+    UTG1 = "utg1"
+    UTG2 = "utg2"
+    LJ = "lj"
+    MP = "mp"
+    HJ = "hj"
+    CO = "co"
 
     def __str__(self):
         return self.name.replace("UTG1", "UTG+1").replace("UTG2", "UTG+2")
