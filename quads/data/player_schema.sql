@@ -65,29 +65,40 @@
 --     FOREIGN KEY (player_id) REFERENCES players(id)
 -- );
 
-DROP TABLE actions;
+-- DROP TABLE actions;
 
-CREATE TABLE IF NOT EXISTS actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_session_id INTEGER NOT NULL,
-    hand_id INTEGER NOT NULL,
-    step_number INTEGER NOT NULL,
-    player_id INTEGER,
-    action TEXT NOT NULL,
-    amount REAL,
-    phase TEXT,
-    cards TEXT,
-    hole_cards TEXT,
-    community_cards TEXT,
-    hand_rank INTEGER,
-    hand_class TEXT,
-    pot_odds REAL,
-    percent_stack_to_call REAL,
-    amount_to_call REAL,
-    highest_bet REAL,
-    position TEXT,
-    detail TEXT,
-    FOREIGN KEY (game_session_id) REFERENCES game_sessions(id),
-    FOREIGN KEY (hand_id) REFERENCES hands(id),
-    FOREIGN KEY (player_id) REFERENCES players(id)
-);
+-- CREATE TABLE IF NOT EXISTS actions (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT,
+--     game_session_id INTEGER NOT NULL,
+--     hand_id INTEGER NOT NULL,
+--     step_number INTEGER NOT NULL,
+--     player_id INTEGER,
+--     action TEXT NOT NULL,
+--     amount REAL,
+--     phase TEXT,
+--     cards TEXT,
+--     hole_cards TEXT,
+--     community_cards TEXT,
+--     hand_rank INTEGER,
+--     hand_class TEXT,
+--     pot_odds REAL,
+--     percent_stack_to_call REAL,
+--     amount_to_call REAL,
+--     highest_bet REAL,
+--     position TEXT,
+--     detail TEXT,
+--     FOREIGN KEY (game_session_id) REFERENCES game_sessions(id),
+--     FOREIGN KEY (hand_id) REFERENCES hands(id),
+--     FOREIGN KEY (player_id) REFERENCES players(id)
+-- );
+
+-- ALTER TABLE actions ADD COLUMN hole_card1    TEXT;
+-- ALTER TABLE actions ADD COLUMN hole_card2    TEXT;
+
+-- ALTER TABLE actions ADD COLUMN pf_hand_class    TEXT;     -- e.g. 'AKs'
+-- ALTER TABLE actions ADD COLUMN high_rank     INTEGER;
+-- ALTER TABLE actions ADD COLUMN low_rank      INTEGER;
+-- ALTER TABLE actions ADD COLUMN is_pair       BOOLEAN;
+-- ALTER TABLE actions ADD COLUMN is_suited     BOOLEAN;
+-- ALTER TABLE actions ADD COLUMN gap           INTEGER;
+-- ALTER TABLE actions ADD COLUMN chen_score    REAL;
