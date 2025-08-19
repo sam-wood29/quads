@@ -1,13 +1,15 @@
 from quads.engine.player import Player
 import quads.engine.player as quads_player
 from quads.engine.logger import get_logger
-from quads.engine.conn import get_conn
+# from quads.engine.conn import get_conn
+from quads.engine.game_state import GameState, PlayerState
+from quads.engine.hand_parser import parse_hole_cards
 from quads.deuces.deck import Deck
+from quads.deuces.card import Card
 from enum import Enum
 from typing import Optional
 from collections import deque
 import sqlite3
-from quads.deuces.card import Card
 
 class RaiseSetting(Enum):
     STANDARD = "standard"
@@ -62,12 +64,15 @@ class Hand:
         # return players, hand_id, keep_playing, script, dealer_index
     
     def play_scripted(self):
+        # mostly building this in smoke_play.py to keep it managable right now.
         # This reset function could be grouped together -- what I am starting with here.
         self.phase = Phase.DEAL
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
         self._post_blinds()
+        self._deal_hole_cards()
+        
         
         
     def play_manual(self):
@@ -190,12 +195,16 @@ class Hand:
                 card_strings = [Card.int_to_str(card1), Card.int_to_str(card2)]
                 cards_for_db = ",".join(card_strings)
             p.hole_cards = cards_for_player
+            features = parse_hole_cards(cards_for_db)
             success = log_action(conn=self.conn, game_session_id=self.game_session_id, hand_id=self.id,
                                  step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE,
-                                 phase=Phase.DEAL, hole_cards=cards_for_db, )
+                                 phase=Phase.DEAL, hole_cards=cards_for_db,
+                                 hole_card1=features.get("hole_card1"), hole_card2=features.get("hole_card2"), pf_hand_class=features.get("hand_class"),
+                                 high_rank=features.get("high_rank"), low_rank=features.get("low_rank"), is_pair=features.get("is_pair"),
+                                 is_suited=features.get("is_suited"), gap=features.get("gap"), chen_score=features.get("chen_score"))
             self.step_number += 1
-            # _log_action_in_db(hand=self, player=p, action=ActionType.DEAL_HOLE, amount=None,
-            #               phase=Phase.DEAL, cards=cards_for_db)
+            if not success:
+                raise RuntimeError(f"Unable to log action while dealing hole cards.")
             
     def _get_betting_round_action_order(self):
         players = self.players_in_button_order
@@ -214,6 +223,22 @@ class Hand:
             next_idx = (idx + 1) % num_players
             players_in_order = players[next_idx:] + players[:next_idx]
         return players_in_order
+    
+    
+    def _rebuild_players_yet_to_act_after_raise(self, action_order: list[Player], raiser: Player) -> list[Player]:
+        highest_bet = self.highest_bet
+        remaining = [
+            p for p in action_order
+            if (not p.has_folded) and (p.stack > 0) and (p is not raiser) and (p.current_bet < highest_bet)
+        ]
+        raiser_index = action_order.index(raiser)
+        ordered = []
+        for i in range(len(action_order) - 1):
+            idx = (raiser_index + 1 + i) % len(action_order)
+            candidate = action_order[idx]
+            if candidate in remaining:
+                ordered.append(candidate)
+        return ordered
     
     def _generate_raise_amounts(self, player: Player, min_raise, max_raise):
         amounts = []
@@ -246,7 +271,7 @@ class Hand:
             if min_raise <= max_raise:
                 va["actions"].append(ActionType.RAISE)
         va["raise_amounts"] = self._generate_raise_amounts(player=player, min_raise=min_raise, max_raise=max_raise)
-        return va
+        return va, amount_to_call
             
         
     def _select_validate_action(self, ap: Player, valid_actions: dict):
@@ -275,17 +300,55 @@ class Hand:
                 if r_amount not in valid_actions["raise_amounts"]:
                     if self.script is not None:
                         raise ValueError("Invalid raise amount in script.")
+                    else:
+                        raise RuntimeError("Unscripted play not supported yet.")
         if r_action not in valid_actions["actions"]:
             if self.script is not None:
                 raise ValueError("Invalid action in script")
+            else:
+                raise ValueError("Unscripted play not supported yet.")
         return r_action, r_amount
     
-    def _get_player_action(self, acting_player: Player, game_state: dict):
+    def _get_player_action(self, acting_player: Player, game_state: GameState):
         ap = acting_player
         amount_to_call = self.highest_bet - ap.current_bet
-        valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
-        s_action, s_amount = self._select_validate_action(player=ap,valid_actions=valid_actions)
+        valid_actions, amount_to_call = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
+        selected_action, selected_amount = self._select_validate_action(ap=ap,valid_actions=valid_actions)
+        return selected_action, selected_amount, amount_to_call
     
+    def handle_player_action(self, game_state: GameState, selected_action: ActionType, selected_amount: float,
+                             acting_player: Player, amount_to_call: float, highest_bet: float):
+        player = acting_player
+        pot_before = self.pot
+        player_stack_before=acting_player.stack
+        if selected_action==ActionType.FOLD:
+            player.has_folded = True
+            total_bet = None
+        elif selected_action == ActionType.CALL:
+            if amount_to_call > player.stack:
+                print("Need to create a side pot here.")
+            call_amount = min(amount_to_call, player.stack)
+            player.stack -= call_amount
+            player.current_bet += call_amount
+            player.round_contrib += call_amount
+            self.pot += call_amount
+            total_bet = None
+        elif selected_action == ActionType.RAISE:
+            total_bet = selected_amount
+            additional_bet = total_bet - player.current_bet
+            prev_highest_bet = self.highest_bet
+            player.stack -= additional_bet
+            player.current_bet += additional_bet
+            player.round_contrib += additional_bet
+            self.pot += additional_bet
+            self.highest_bet = player.current_bet
+            # Update last_raise_increment only if this is a full raise (not an all-in for less)
+            raise_incr = self.highest_bet - prev_highest_bet
+            if prev_highest_bet == 0 or raise_incr >= getattr(self, "last_raise_increment", 0):
+                self.last_raise_increment = raise_incr
+        return selected_action
+
+
     def _run_betting_round(self):
         if self.phase == Phase.PREFLOP:
             self.last_raise_increment = self.big_blind
@@ -294,7 +357,57 @@ class Hand:
         players_yet_to_act = [p for p in action_order if not p.has_folded and p.stack > 0]
         while players_yet_to_act:
             acting_player = players_yet_to_act.pop(0)
-            self._get_player_action(acting_player)
+            game_state = self.get_game_state(action_on_player_id=acting_player.id)
+            selected_action, selected_amount, amount_to_call = self._get_player_action(acting_player=acting_player, game_state=game_state)
+            result = self.handle_player_action(game_state=game_state, selected_action=selected_action, selected_amount=selected_amount,
+                                               acting_player=acting_player, amount_to_call=amount_to_call, highest_bet=self.highest_bet)
+            # If the acting player raises (or bets from 0), everyone else who hasn't matched must act again.
+            if result == ActionType.RAISE:
+                players_yet_to_act = self._rebuild_players_yet_to_act_after_raise(action_order=action_order, raiser=acting_player)
+            # If no one left to act, the betting round ends.
+            if not players_yet_to_act:
+                break
+
+    def get_game_state(self, action_on_player_id: int = None, last_action: dict = None) -> GameState:
+        player_states = []
+        for p in self.players:
+            # Convert integer hole cards to string if needed
+            if p.hole_cards and isinstance(p.hole_cards, list):
+                from quads.deuces.card import Card
+                hole_cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in p.hole_cards]
+            else:
+                hole_cards = None
+            player_states.append(PlayerState(
+                id=p.id,
+                name=p.name,
+                stack=p.stack,
+                position=str(p.position) if p.position else None,
+                hole_cards=hole_cards,
+                has_folded=p.has_folded,
+                is_all_in=p.all_in,
+                current_bet=p.current_bet,
+                round_contrib=p.round_contrib,
+                hand_contrib=p.hand_contrib
+            ))
+        # Add community card attribute to Hand Class
+        community_cards = getattr(self, 'community_cards', [])
+        if community_cards and isinstance(community_cards[0], int):
+            from quads.deuces.card import Card
+            community_cards = [Card.int_to_str(c) for c in community_cards]
+        return GameState(
+            hand_id=self.id,
+            phase=str(self.phase),
+            pot=self.pot,
+            community_cards=community_cards,
+            players=player_states,
+            action_on=action_on_player_id,
+            last_action=last_action,
+            min_raise=getattr(self, 'min_raise', 0.0),
+            max_raise=getattr(self, 'max_raise', 0.0),
+            small_blind=self.small_blind,
+            big_blind=self.big_blind,
+            dealer_position=str(self.players[self.dealer_index].position) if self.dealer_index is not None else ''
+        )
             
     
 def log_action(
@@ -316,7 +429,16 @@ def log_action(
     amount_to_call: float = None,
     highest_bet: float = None,
     position: str = None,
-    detail: str = None
+    detail: str = None,
+    hole_card1: str = None,
+    hole_card2: str = None,
+    pf_hand_class: str = None,
+    high_rank: int = None,
+    low_rank: int = None,
+    is_pair: int = None,
+    is_suited: int = None,
+    gap: int = None,
+    chen_score: float = None
 ) -> bool:
     try:
         cursor = conn
@@ -325,13 +447,15 @@ def log_action(
                 game_session_id, hand_id, step_number, player_id, action, amount,
                 phase, cards, hole_cards, community_cards,
                 hand_rank, hand_class, pot_odds, percent_stack_to_call,
-                amount_to_call, highest_bet, position, detail
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                amount_to_call, highest_bet, position, detail,
+                hole_card1, hole_card2, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             game_session_id, hand_id, step_number, player.id, action, amount,
             phase, cards, hole_cards, community_cards,
             hand_rank, hand_class, pot_odds, percent_stack_to_call,
-            amount_to_call, highest_bet, position, detail
+            amount_to_call, highest_bet, position, detail,
+            hole_card1, hole_card2, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score
         ))
         conn.commit()
         return True

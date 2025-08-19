@@ -20,6 +20,7 @@
         { "type": "deal_hole", "player": "5", "cards": ["3s", "3c"] },
         { "type": "deal_hole", "player": "6", "cards": ["2s", "2c"] },
         { "type": "deal_hole", "player": "1", "cards": ["As", "Ac"] },
+        
         { "type": "action", "player": 4, "move": "call", "amount": 0 }
     ]
-}   
+}
