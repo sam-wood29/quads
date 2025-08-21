@@ -1,11 +1,11 @@
 from quads.engine.player import Player
 import quads.engine.player as quads_player
 from quads.engine.logger import get_logger
-# from quads.engine.conn import get_conn
 from quads.engine.game_state import GameState, PlayerState
 from quads.engine.hand_parser import parse_hole_cards
 from quads.deuces.deck import Deck
 from quads.deuces.card import Card
+from quads.deuces.evaluator import Evaluator
 from enum import Enum
 from typing import Optional
 from collections import deque
@@ -17,6 +17,7 @@ class RaiseSetting(Enum):
 class Phase(str, Enum):
     DEAL = "deal"
     PREFLOP = "preflop"
+    FLOP = "flop"
     TURN = "turn"
     RIVER = "river"
     SHOWDOWN = "showdown"
@@ -173,6 +174,7 @@ class Hand:
         if self.script_index >= len(self.script):
             raise RuntimeError("No more scripted actions")
         action = self.script[self.script_index]
+        print(action) # helpline
         self.script_index += 1
         return action
         
@@ -196,9 +198,13 @@ class Hand:
                 cards_for_db = ",".join(card_strings)
             p.hole_cards = cards_for_player
             features = parse_hole_cards(cards_for_db)
+            if (features.get("is_pair", ValueError("unfound key")) == 1):
+                hand_class = 8
+            else:
+                hand_class = 9
             success = log_action(conn=self.conn, game_session_id=self.game_session_id, hand_id=self.id,
-                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE,
-                                 phase=Phase.DEAL, hole_cards=cards_for_db,
+                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE, position=p.position,
+                                 phase=Phase.DEAL, hole_cards=cards_for_db, hand_class=hand_class,
                                  hole_card1=features.get("hole_card1"), hole_card2=features.get("hole_card2"), pf_hand_class=features.get("hand_class"),
                                  high_rank=features.get("high_rank"), low_rank=features.get("low_rank"), is_pair=features.get("is_pair"),
                                  is_suited=features.get("is_suited"), gap=features.get("gap"), chen_score=features.get("chen_score"))
@@ -346,7 +352,156 @@ class Hand:
             raise_incr = self.highest_bet - prev_highest_bet
             if prev_highest_bet == 0 or raise_incr >= getattr(self, "last_raise_increment", 0):
                 self.last_raise_increment = raise_incr
+        
+        data = self._get_last_player_action_data(player=player)
+        if self.phase == Phase.PREFLOP:
+            hand_class=data.get("hand_class")
+            community_cards=None
+            score=None
+        else:
+            community_cards = self._get_community_cards(phase=self.phase)
+            ccs = community_cards
+            hand_cs = data.get("hole_cards")
+            score, hand_class = self._get_score(hand_cs=hand_cs, ccs=ccs)
+        if amount_to_call == 0:
+            percent_stack_to_call = None
+            pot_odds = None
+        else:
+            percent_stack_to_call = _calculate_pct_stack_to_call(p_stack=acting_player.stack, amount_to_call=amount_to_call)
+            pot_odds = _calculate_pot_odds(amt_to_call=amount_to_call, c_pot=pot_before)
+            
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=acting_player,
+            position=acting_player.position,
+            phase=self.phase,
+            action=selected_action,
+            amount=selected_amount if selected_action in [ActionType.CALL, ActionType.RAISE] else None,
+            
+            hole_cards=data.get("hole_cards"),
+            hole_card1=data.get("hole_card1"),
+            hole_card2=data.get("hole_card2"),
+            community_cards=community_cards,
+            hand_rank_5=score,
+            hand_class=hand_class,
+            
+            pf_hand_class=data.get("pf_hand_class"),
+            high_rank=data.get("high_rank"),
+            low_rank=data.get("low_rank"),
+            is_pair=data.get("is_pair"),
+            is_suited=data.get("is_suited"),
+            gap=data.get("gap"),
+            chen_score=data.get("chen_score"),
+            
+            amount_to_call=amount_to_call,
+            percent_stack_to_call=percent_stack_to_call,
+            highest_bet=highest_bet,
+            pot_odds=pot_odds,
+            # detail=
+        )
+        
         return selected_action
+        
+    
+    def _get_score(self, hand_cs: str, ccs: str) -> tuple[int, int]:
+        hole_card_strings = [card.strip() for card in hand_cs.split(',')]
+        hand_cards = [Card.new(card_str) for card_str in hole_card_strings]
+        community_card_strings = [card.strip() for card in ccs.split(',')]
+        board = [Card.new(card_str) for card_str in community_card_strings]
+        
+        evaluator = Evaluator()
+        score = evaluator.evaluate(hand_cards, board)
+        hand_class = evaluator.get_rank_class(score)
+         
+        return score, hand_class
+         
+         
+    def _get_community_cards(self, phase: Phase) -> str:
+        cards = self._deal_community_cards()
+        match phase:
+            case Phase.FLOP:
+                x = cards.count(",")
+                if x != 2:
+                    raise ValueError("Something went wrong.")
+            case Phase.TURN | Phase.RIVER:
+                last_ccs = self._get_last_ccs()
+                cards = f"{last_ccs}, {cards}"
+            case _ :
+                raise ValueError("Something is wrong.")
+        return cards
+    
+    def _deal_community_cards(self) -> str:
+        script = self.script if self.script else None
+        if script is not None:
+            print("scripted game")
+            action = self._get_next_script_action()
+            if action["type"] != "deal_community":
+                raise ValueError("Something is wrong.")
+            cards = action["cards"]
+            cards = ",".join(cards) 
+        else:
+            print("not scripted game")
+            raise ValueError("Unscripted play not implemented yet. :(")
+        
+        return cards
+
+    def _get_last_ccs(self) -> str:
+        hand_id = self.id
+        if self.phase not in [Phase.TURN, Phase.RIVER]:
+            raise ValueError("You messed up.")
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                           SELECT community_cards FROM actions WHERE hand_id = ? ORDER BY step_number DESC LIMIT 1
+                           """, (hand_id,))
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+            return ""
+        except Exception as e:
+            print(f"Exception: {e}")
+            raise ValueError(":(")
+    
+    def _get_last_player_action_data(self, player: Player) -> dict:
+        """
+        Get the last action data for a specific player in the current hand.
+        Returns a dict with the preflop metrics we want to reuse.
+        """
+        player_id = player.id
+        hand_id = self.id
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT hole_cards, hole_card1, hole_card2, hand_class, pf_hand_class, 
+                    high_rank, low_rank, is_pair, is_suited, gap, chen_score
+                FROM actions 
+                WHERE player_id = ? AND hand_id = ? 
+                ORDER BY step_number DESC 
+                LIMIT 1
+            """, (player_id, hand_id))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'hole_cards': result[0],
+                    'hole_card1': result[1], 
+                    'hole_card2': result[2],
+                    'hand_class': result[3],
+                    'pf_hand_class': result[4],
+                    'high_rank': result[5],
+                    'low_rank': result[6],
+                    'is_pair': result[7],
+                    'is_suited': result[8],
+                    'gap': result[9],
+                    'chen_score': result[10]
+                }
+            return {}
+        except Exception as e:
+            print(f"ERROR - Failed to get last player action data: {e}")
+        return {}
 
 
     def _run_betting_round(self):
@@ -359,6 +514,7 @@ class Hand:
             acting_player = players_yet_to_act.pop(0)
             game_state = self.get_game_state(action_on_player_id=acting_player.id)
             selected_action, selected_amount, amount_to_call = self._get_player_action(acting_player=acting_player, game_state=game_state)
+            print(game_state) # helpline
             result = self.handle_player_action(game_state=game_state, selected_action=selected_action, selected_amount=selected_amount,
                                                acting_player=acting_player, amount_to_call=amount_to_call, highest_bet=self.highest_bet)
             # If the acting player raises (or bets from 0), everyone else who hasn't matched must act again.
@@ -419,10 +575,9 @@ def log_action(
     action: str,
     amount: float = None,
     phase: str = None,
-    cards: str = None,
     hole_cards: str = None,
     community_cards: str = None,
-    hand_rank: int = None,
+    hand_rank_5: int = None,
     hand_class: str = None,
     pot_odds: float = None,
     percent_stack_to_call: float = None,
@@ -444,21 +599,26 @@ def log_action(
         cursor = conn
         cursor.execute("""
             INSERT INTO actions (
-                game_session_id, hand_id, step_number, player_id, action, amount,
-                phase, cards, hole_cards, community_cards,
-                hand_rank, hand_class, pot_odds, percent_stack_to_call,
-                amount_to_call, highest_bet, position, detail,
-                hole_card1, hole_card2, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                game_session_id, hand_id, step_number, player_id, position, phase, action, amount,
+                hole_cards, hole_card1, hole_card2, community_cards,
+                hand_rank_5, hand_class, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score,
+                amount_to_call, percent_stack_to_call, highest_bet, pot_odds, detail
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            game_session_id, hand_id, step_number, player.id, action, amount,
-            phase, cards, hole_cards, community_cards,
-            hand_rank, hand_class, pot_odds, percent_stack_to_call,
-            amount_to_call, highest_bet, position, detail,
-            hole_card1, hole_card2, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score
+            game_session_id, hand_id, step_number, player.id, position, phase, action, amount,
+            hole_cards, hole_card1, hole_card2, community_cards,
+            hand_rank_5, hand_class, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score,
+            amount_to_call, percent_stack_to_call, highest_bet, pot_odds, detail
         ))
         conn.commit()
         return True
     except Exception as e:
         print(f"ERROR - Failed to log action: {e}")
         return False
+    
+def _calculate_pot_odds(amt_to_call: float, c_pot: float) -> float:
+    pot_odds = round((amt_to_call / (c_pot + amt_to_call)) * 100, 2)
+    return pot_odds
+
+def _calculate_pct_stack_to_call(p_stack: float, amount_to_call: float) -> float:
+    return round(((amount_to_call/p_stack)* 100), 2) 
