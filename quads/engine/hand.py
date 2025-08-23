@@ -47,7 +47,6 @@ class Hand:
         self.conn = conn
         self.script = script
         self.raise_settings = raise_settings
-        self.deck = deck
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.script_index = script_index
@@ -154,15 +153,15 @@ class Hand:
         hand_id = self.id
         step_number = self.step_number
         player = sb_player
-        action = ActionType.POST_SMALL_BLIND
+        action = ActionType.POST_SMALL_BLIND.value
         amount = sb_paid
-        phase = Phase.DEAL
+        phase = Phase.DEAL.value
         position = sb_player.position
         sb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
                    player=player, action=action, amount=amount, phase=phase, position=position)
         self.step_number += 1
         player=bb_player
-        action=ActionType.POST_BIG_BLIND
+        action=ActionType.POST_BIG_BLIND.value
         amount=bb_paid
         position = bb_player.position
         bb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
@@ -203,8 +202,8 @@ class Hand:
             else:
                 hand_class = 9
             success = log_action(conn=self.conn, game_session_id=self.game_session_id, hand_id=self.id,
-                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE, position=p.position,
-                                 phase=Phase.DEAL, hole_cards=cards_for_db, hand_class=hand_class,
+                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE.value, position=p.position,
+                                 phase=Phase.DEAL.value, hole_cards=cards_for_db, hand_class=hand_class,
                                  hole_card1=features.get("hole_card1"), hole_card2=features.get("hole_card2"), pf_hand_class=features.get("hand_class"),
                                  high_rank=features.get("high_rank"), low_rank=features.get("low_rank"), is_pair=features.get("is_pair"),
                                  is_suited=features.get("is_suited"), gap=features.get("gap"), chen_score=features.get("chen_score"))
@@ -367,7 +366,7 @@ class Hand:
             percent_stack_to_call = None
             pot_odds = None
         else:
-            percent_stack_to_call = _calculate_pct_stack_to_call(p_stack=acting_player.stack, amount_to_call=amount_to_call)
+            percent_stack_to_call = _calculate_pct_stack_to_call(p_stack=player_stack_before, amount_to_call=amount_to_call)
             pot_odds = _calculate_pot_odds(amt_to_call=amount_to_call, c_pot=pot_before)
             
         log_action(
@@ -377,8 +376,8 @@ class Hand:
             step_number=self.step_number,
             player=acting_player,
             position=acting_player.position,
-            phase=self.phase,
-            action=selected_action,
+            phase=self.phase.value,
+            action=selected_action.value,
             amount=selected_amount if selected_action in [ActionType.CALL, ActionType.RAISE] else None,
             
             hole_cards=data.get("hole_cards"),
@@ -550,6 +549,12 @@ class Hand:
         if community_cards and isinstance(community_cards[0], int):
             from quads.deuces.card import Card
             community_cards = [Card.int_to_str(c) for c in community_cards]
+            
+        dealer_position = ""
+        if self.dealer_index is not None:
+            dealer_player = next((p for p in self.players if p.seat_index == self.dealer_index), None)
+            if dealer_player:
+                dealer_position = str(dealer_player.position)
         return GameState(
             hand_id=self.id,
             phase=str(self.phase),
@@ -562,7 +567,7 @@ class Hand:
             max_raise=getattr(self, 'max_raise', 0.0),
             small_blind=self.small_blind,
             big_blind=self.big_blind,
-            dealer_position=str(self.players[self.dealer_index].position) if self.dealer_index is not None else ''
+            dealer_position=dealer_position
         )
             
     
@@ -596,8 +601,8 @@ def log_action(
     chen_score: float = None
 ) -> bool:
     try:
-        cursor = conn
-        cursor.execute("""
+        cur = conn.cursor()
+        cur.execute("""
             INSERT INTO actions (
                 game_session_id, hand_id, step_number, player_id, position, phase, action, amount,
                 hole_cards, hole_card1, hole_card2, community_cards,

@@ -1,5 +1,6 @@
-from random import shuffle
+from random import shuffle, seed
 from .card import Card
+import time
 
 class Deck:
     """
@@ -8,14 +9,26 @@ class Deck:
     makes a copy of this object and shuffles it. 
     """
     _FULL_DECK = []
+    _seed_set = False
 
     def __init__(self):
         self.shuffle()
 
     def shuffle(self):
-        # and then shuffle
         self.cards = Deck.GetFullDeck()
         shuffle(self.cards)
+        
+    @classmethod
+    def set_seed(cls, seed_value: int):
+        """Set a random seed for reproducible shuffling."""
+        seed(seed_value)
+        cls._seed_set = True
+    
+    @classmethod
+    def reset_seed(cls):
+        """Reset to random seed"""
+        seed(int(time.time() * 1000000))
+        cls._seed_set = False
 
     def draw(self, n=1):
         if n == 1:
