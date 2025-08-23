@@ -10,7 +10,6 @@ def parse_hole_cards(hole_cards_str):
     is_pair = int(rank1 == rank2)
     is_suited = int(suit1 == suit2)
     gap = abs(rank1 - rank2)
-    is_connector = int(gap == 1)
     # Hand class: e.g. "AKs", "72o"
     hand_class = f"{card1[0]}{card2[0]}{'s' if is_suited else 'o'}" if rank1 >= rank2 else f"{card2[0]}{card1[0]}{'s' if is_suited else 'o'}"
     chen_score = compute_chen_score(rank1, rank2, is_pair, is_suited, gap)
@@ -30,7 +29,6 @@ def compute_chen_score(rank1, rank2, is_pair, is_suited, gap):
     # Chen formula simplified
     chen_values = {14:10, 13:8, 12:7, 11:6, 10:5, 9:4.5, 8:4, 7:3.5, 6:3, 5:2.5, 4:2, 3:1.5, 2:1}
     high = max(rank1, rank2)
-    low = min(rank1, rank2)
     score = chen_values[high]
     if is_pair:
         score = max(score * 2, 5)

@@ -1,6 +1,8 @@
-from random import shuffle, seed
-from .card import Card
 import time
+from random import seed, shuffle
+
+from .card import Card
+
 
 class Deck:
     """

@@ -1,4 +1,4 @@
-class Card ():
+class Card :
     """
     Static class that handles cards. We represent cards as 32-bit integers, so 
     there is no object instantiation - they are just ints. Most of the bits are 
@@ -42,10 +42,10 @@ class Card ():
 
     # for pretty printing
     PRETTY_SUITS = {
-        1: u"\u2660",  # spades
-        2: u"\u2764",  # hearts
-        4: u"\u2666",  # diamonds
-        8: u"\u2663"  # clubs
+        1: "\u2660",  # spades
+        2: "\u2764",  # hearts
+        4: "\u2666",  # diamonds
+        8: "\u2663"  # clubs
     }
     PRETTY_REDS = [2, 4]
 
@@ -169,7 +169,7 @@ class Card ():
         s = Card.PRETTY_SUITS[suit_int]
         if colorize and suit_int in Card.PRETTY_REDS:
             try:
-                from termcolor import colored # type: ignore
+                from termcolor import colored  # type: ignore
                 s = colored(s, "red")
             except ImportError:
                 pass

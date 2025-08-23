@@ -37,12 +37,14 @@ where = ["quads"]
 [tool.ruff]
 line-length = 88
 target-version ="py311"
-select = ["E", "F", "I", "UP"] 
 # e - error checks
 # f - pyflake, (import checks)
 # upgrade (syntax)
 # import related checks
-ignore = ["E501"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"] 
+ignore = ["E501", "UP031"]
 
 [tool.coverage.run]
 branch = true

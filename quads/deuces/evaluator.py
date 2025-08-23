@@ -1,8 +1,10 @@
 import itertools
+
 from .card import Card
 from .lookup import LookupTable
 
-class Evaluator(object):
+
+class Evaluator:
     """
     Evaluates hand strengths using a variant of Cactus Kev's algorithm:
     http://suffe.cool/poker/evaluator.html

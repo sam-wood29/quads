@@ -1,7 +1,9 @@
 import itertools
+
 from .card import Card
 
-class LookupTable(object):
+
+class LookupTable:
     """
     Number of Distinct Hand Values:
 

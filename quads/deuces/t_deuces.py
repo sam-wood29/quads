@@ -1,7 +1,6 @@
-import mock
+from unittest import mock
 
-from . import Card, Evaluator, Deck
-
+from . import Card, Deck, Evaluator
 
 EXAMPLE = (
     (Card.new('4c'), Card.new('As'), Card.new('5d'), Card.new('Kc'), Card.new('2s')),

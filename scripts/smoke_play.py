@@ -1,6 +1,7 @@
 import quads.engine.game as quads_game
 import quads.engine.hand as quads_hand
 
+
 def main():
     game = quads_game.create_game_from_script('test_script1.json')
     hand = quads_hand.Hand(players=game.players,id=1,deck=game.deck,dealer_index=game.dealer_index,

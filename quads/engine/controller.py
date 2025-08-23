@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ControllerType(Enum):
     SCRIPT = "script"
     MANUAL = "manual"

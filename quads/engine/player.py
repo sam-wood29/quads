@@ -1,13 +1,12 @@
-from quads.engine.controller import Controller, ControllerType
-from quads.engine.logger import get_logger
-from quads.engine.conn import get_conn
-from typing import Optional
 import sqlite3
-from collections import deque
-from enum import Enum, auto
+from enum import Enum
+
+from quads.engine.conn import get_conn
+from quads.engine.controller import Controller, ControllerType
+
 
 class Player: 
-    def __init__(self, id: int, name: Optional[str], controller: Controller, stack: float, seat_index: int):
+    def __init__(self, id: int, name: str | None, controller: Controller, stack: float, seat_index: int):
         self.id = id
         self.name = name
         self.controller = controller
@@ -53,7 +52,7 @@ POSITIONS_BY_PLAYER_COUNT = {
 }
     
 def create_load_player_from_script(player_data: list, same_stack: bool, stack_amount: float) -> list[Player]:
-    if same_stack != True:
+    if not same_stack:
         raise RuntimeError("Different starting stacks not implemented.")
     existing_players = [p for p in player_data if p.get("status") == "exists"]
     new_players = [p for p in player_data if p.get("status" == "new")]
@@ -96,11 +95,11 @@ def load_existing_players_by_id(player_list: list, same_stack: bool, stack_amoun
     cursor.execute(query, ids)
     rows = cursor.fetchall()
     conn.close()
-    if is_script == True:
+    if is_script:
         controller = Controller(controller_type=ControllerType.SCRIPT)
     else:
         raise RuntimeError("Non Scripted play not implemented.")
-    if same_stack == True:
+    if same_stack:
         players = []
         for i, row in enumerate(rows):
             player = Player(id=row[0], name=row[1], stack=stack_amount, controller=controller, seat_index=i)

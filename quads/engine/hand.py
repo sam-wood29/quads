@@ -1,15 +1,16 @@
-from quads.engine.player import Player
+import sqlite3
+from collections import deque
+from enum import Enum
+
 import quads.engine.player as quads_player
-from quads.engine.logger import get_logger
+from quads.deuces.card import Card
+from quads.deuces.deck import Deck
+from quads.deuces.evaluator import Evaluator
 from quads.engine.game_state import GameState, PlayerState
 from quads.engine.hand_parser import parse_hole_cards
-from quads.deuces.deck import Deck
-from quads.deuces.card import Card
-from quads.deuces.evaluator import Evaluator
-from enum import Enum
-from typing import Optional
-from collections import deque
-import sqlite3
+from quads.engine.logger import get_logger
+from quads.engine.player import Player
+
 
 class RaiseSetting(Enum):
     STANDARD = "standard"
@@ -36,9 +37,9 @@ class ActionType(str, Enum):
 
 class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
-                  conn: sqlite3.Connection, script: Optional[dict] = None, 
+                  conn: sqlite3.Connection, script: dict | None = None, 
                   raise_settings: RaiseSetting = RaiseSetting.STANDARD, small_blind: float = 0.25, 
-                  big_blind: float = 0.50, script_index: Optional[int] = None):
+                  big_blind: float = 0.50, script_index: int | None = None):
         self.players = players
         self.id = id
         self.deck = deck
@@ -209,7 +210,7 @@ class Hand:
                                  is_suited=features.get("is_suited"), gap=features.get("gap"), chen_score=features.get("chen_score"))
             self.step_number += 1
             if not success:
-                raise RuntimeError(f"Unable to log action while dealing hole cards.")
+                raise RuntimeError("Unable to log action while dealing hole cards.")
             
     def _get_betting_round_action_order(self):
         players = self.players_in_button_order

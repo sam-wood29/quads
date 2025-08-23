@@ -1,12 +1,13 @@
-import sqlite3
-import os
 import argparse
+import os
+import sqlite3
 import sys
+
 
 def run_schema(schema_path, db_path, schema_arg, db_arg) -> bool:
     """Execute schema and return success status"""
     try:
-        with open(schema_path, 'r') as f:
+        with open(schema_path) as f:
             schema = f.read()
         conn = sqlite3.connect(db_path)
         try:

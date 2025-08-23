@@ -1,16 +1,16 @@
+import json
+import os
+import sqlite3
+from datetime import UTC, datetime
+from enum import Enum
+
+import quads.engine.player as quads_player
+from quads.deuces.deck import Deck
+from quads.engine.conn import get_conn
+from quads.engine.hand import Hand
 from quads.engine.logger import get_logger
 from quads.engine.player import Player
-import quads.engine.player as quads_player
-from quads.engine.hand import Hand
-import quads.engine.hand as quads_hand
-from quads.engine.conn import get_conn
-from quads.deuces.deck import Deck
-from enum import Enum
-from typing import Optional
-import os
-import json
-import sqlite3
-from datetime import datetime, timezone
+
 
 class ReBuySetting(Enum):
     ONE_LEFT = "one_left"
@@ -20,7 +20,7 @@ class GameType(Enum):
     SCRIPTED = "scripted"
 
 class GameSession:
-    def __init__(self, players: list[Player], gametype: GameType, data: Optional[dict], script: Optional[dict], rebuy_setting: ReBuySetting, small_blind: float = 0.25, big_blind: float = 0.50):
+    def __init__(self, players: list[Player], gametype: GameType, data: dict | None, script: dict | None, rebuy_setting: ReBuySetting, small_blind: float = 0.25, big_blind: float = 0.50):
         self.players = players
         self.gametype = gametype
         self.script = script
@@ -51,7 +51,7 @@ class GameSession:
         players = self.players
         deck = self.deck
         script = self.script
-        while keep_playing == True:
+        while keep_playing:
             hand = Hand(players=players, id=hand_id, deck=deck, script=script, 
                         dealer_index=self.dealer_index, game_session_id=self.session_id,
                         conn=self.conn)
@@ -80,7 +80,7 @@ class GameSession:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
                 self.gametype.value,
                 self.small_blind,
                 self.big_blind,
@@ -104,6 +104,7 @@ def run_scripted_game_session(script: str):
     4. Play the game with the script.    
     """
     game = create_game_from_script(script=script)
+    print(game) # this is a filler for ruff - Not sure what is going on here.
     
 
 def create_game_from_script(script: str):

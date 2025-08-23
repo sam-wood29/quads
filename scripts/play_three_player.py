@@ -1,6 +1,7 @@
-from quads.engine.player import Player
 from quads.engine.base_controller import ManualInputController
 from quads.engine.game import Game
+from quads.engine.player import Player
+
 
 def main():
     # Fixed player order: Alice (Button), Bob (SB), Charlie (BB)
