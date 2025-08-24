@@ -23,7 +23,6 @@
         
         { "type": "action", "player": 4, "move": "call", "amount": 0 },
         
-
-        { "type": "deal_community", "cards": ["5s", "5d"] }
+        { "type": "deal_community", "cards": ["5s", "5d", "5h"] }
     ]
 }

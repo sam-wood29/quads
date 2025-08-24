@@ -51,22 +51,13 @@ class Hand:
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.script_index = script_index
+        self.community_cards: list[int] = []
         self.pot = 0.0
         self.step_number = 1
         self.phase: Phase
         self.logger = get_logger(__name__)
     
     def play(self):
-        if self.script is not None:
-            self.play_scripted()
-        else:
-            self.play_manual()
-        # Eventually
-        # return players, hand_id, keep_playing, script, dealer_index
-    
-    def play_scripted(self):
-        # mostly building this in smoke_play.py to keep it managable right now.
-        # This reset function could be grouped together -- what I am starting with here.
         self.phase = Phase.DEAL
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
@@ -74,7 +65,35 @@ class Hand:
         self._post_blinds()
         self._deal_hole_cards()
         
+        # phase progression
+        self.phase = Phase.PREFLOP
+        self._run_betting_round()
         
+        # Deal flop if more than one player remains
+        remaining_players = [p for p in self.players if not p.has_folded]
+        if len(remaining_players) > 1:
+            self.phase = Phase.FLOP
+            self._apply_community_deal(Phase.FLOP)
+            self._run_betting_round()
+            
+            # deal turn if more than one player left
+            remaining_players = [p for p in self.players if not p.has_folded]
+            if len(remaining_players) > 1:
+                self.phase = Phase.TURN
+                self._apply_community_deal(Phase.TURN)
+                self._run_betting_round()
+            
+                # Deal river if more than one player remains
+                remaining_players = [p for p in self.players if not p.has_folded]
+                if len(remaining_players) > 1:
+                    self.phase = Phase.RIVER
+                    self._apply_community_deal(Phase.RIVER)
+                    self._run_betting_round()
+        # Showdown
+        self.phase = Phase.SHOWDOWN
+        # TODO: Implement showdown logic
+        
+        return self.players, self.id, self.deck, False, self.script, self.dealer_index    
         
     def play_manual(self):
         raise RuntimeError("Manual Play not implemented yet.")
@@ -409,29 +428,25 @@ class Hand:
     def _get_score(self, hand_cs: str, ccs: str) -> tuple[int, int]:
         hole_card_strings = [card.strip() for card in hand_cs.split(',')]
         hand_cards = [Card.new(card_str) for card_str in hole_card_strings]
-        community_card_strings = [card.strip() for card in ccs.split(',')]
-        board = [Card.new(card_str) for card_str in community_card_strings]
+        
+        
+        board = self.community_cards
         
         evaluator = Evaluator()
         score = evaluator.evaluate(hand_cards, board)
         hand_class = evaluator.get_rank_class(score)
-         
+        
         return score, hand_class
          
          
     def _get_community_cards(self, phase: Phase) -> str:
-        cards = self._deal_community_cards()
-        match phase:
-            case Phase.FLOP:
-                x = cards.count(",")
-                if x != 2:
-                    raise ValueError("Something went wrong.")
-            case Phase.TURN | Phase.RIVER:
-                last_ccs = self._get_last_ccs()
-                cards = f"{last_ccs}, {cards}"
-            case _ :
-                raise ValueError("Something is wrong.")
-        return cards
+        """Get Community cards for logging."""
+        if not self.community_cards:
+            return ""
+        
+        card_strings = [Card.int_to_str(card) for card in self.community_cards]
+        return ",".join(card_strings)
+        
     
     def _deal_community_cards(self) -> str:
         script = self.script if self.script else None
@@ -440,30 +455,31 @@ class Hand:
             action = self._get_next_script_action()
             if action["type"] != "deal_community":
                 raise ValueError("Something is wrong.")
-            cards = action["cards"]
-            cards = ",".join(cards) 
+            card_strings = action["cards"]
+            # convert to deuces ints
+            cards = [Card.new(card_str) for card_str in card_strings]
         else:
             print("not scripted game")
             raise ValueError("Unscripted play not implemented yet. :(")
         
         return cards
+    
+    def _apply_community_deal(self, phase: Phase) -> None:
+        """Apply community card deal to the authoritative list"""
+        new_cards = self._deal_community_cards()
+        if phase == Phase.FLOP:
+            # Flop should be exactly 3 cards
+            if len(new_cards) != 3:
+                raise ValueError(f"Flop must be 3 cards, got {len(new_cards)}")
+            self.community_cards = new_cards
+        elif phase in (Phase.TURN, Phase.RIVER):
+            # Turn adds 1 card
+            if len(new_cards) != 1:
+                raise ValueError(f"Turn must be 1 card, got {len(new_cards)}")
+            self.community_cards.append(new_cards[0])
+        else:
+            raise ValueError(f"Invalid phase for community deal: {phase}")
 
-    def _get_last_ccs(self) -> str:
-        hand_id = self.id
-        if self.phase not in [Phase.TURN, Phase.RIVER]:
-            raise ValueError("You messed up.")
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                           SELECT community_cards FROM actions WHERE hand_id = ? ORDER BY step_number DESC LIMIT 1
-                           """, (hand_id,))
-            result = cursor.fetchone()
-            if result:
-                return result[0]
-            return ""
-        except Exception as e:
-            print(f"Exception: {e}")
-            raise ValueError(":(")
     
     def _get_last_player_action_data(self, player: Player) -> dict:
         """
@@ -546,10 +562,9 @@ class Hand:
                 hand_contrib=p.hand_contrib
             ))
         # Add community card attribute to Hand Class
-        community_cards = getattr(self, 'community_cards', [])
-        if community_cards and isinstance(community_cards[0], int):
-            from quads.deuces.card import Card
-            community_cards = [Card.int_to_str(c) for c in community_cards]
+        community_cards = []
+        if self.community_cards:
+            community_cards = [Card.int_to_str(c) for c in self.community_cards]
             
         dealer_position = ""
         if self.dealer_index is not None:
