@@ -1,39 +1,18 @@
 import sqlite3
 from collections import deque
-from enum import Enum
+from collections.abc import Iterator
 
 import quads.engine.player as quads_player
 from quads.deuces.card import Card
 from quads.deuces.deck import Deck
 from quads.deuces.evaluator import Evaluator
+from quads.engine.betting_order import BettingOrder
+from quads.engine.enums import ActionType, Phase, RaiseSetting
 from quads.engine.game_state import GameState, PlayerState
 from quads.engine.hand_parser import parse_hole_cards
 from quads.engine.logger import get_logger
-from quads.engine.player import Player
+from quads.engine.player import Player, Position
 
-
-class RaiseSetting(Enum):
-    STANDARD = "standard"
-    
-class Phase(str, Enum):
-    DEAL = "deal"
-    PREFLOP = "preflop"
-    FLOP = "flop"
-    TURN = "turn"
-    RIVER = "river"
-    SHOWDOWN = "showdown"
-    
-class ActionType(str, Enum):
-    CALL = "call"
-    RAISE = "raise"
-    CHECK = "check"
-    FOLD = "fold"
-    BET = "bet"
-    DEAL_HOLE = "deal_hole"
-    DEAL_COMMUNITY = "deal_community"
-    WIN_POT = "win_pot"
-    POST_SMALL_BLIND = "post_small_blind"
-    POST_BIG_BLIND = "post_big_blind"
 
 class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
@@ -521,23 +500,67 @@ class Hand:
 
 
     def _run_betting_round(self):
+        """Run a complete betting round using the new table-driven approach."""
         if self.phase == Phase.PREFLOP:
             self.last_raise_increment = self.big_blind
-        action_order = self._get_betting_round_action_order()
-        self.highest_bet = max(p.current_bet for p in action_order)
-        players_yet_to_act = [p for p in action_order if not p.has_folded and p.stack > 0]
-        while players_yet_to_act:
-            acting_player = players_yet_to_act.pop(0)
-            game_state = self.get_game_state(action_on_player_id=acting_player.id)
-            selected_action, selected_amount, amount_to_call = self._get_player_action(acting_player=acting_player, game_state=game_state)
-            print(game_state) # helpline
-            result = self.handle_player_action(game_state=game_state, selected_action=selected_action, selected_amount=selected_amount,
-                                               acting_player=acting_player, amount_to_call=amount_to_call, highest_bet=self.highest_bet)
-            # If the acting player raises (or bets from 0), everyone else who hasn't matched must act again.
-            if result == ActionType.RAISE:
-                players_yet_to_act = self._rebuild_players_yet_to_act_after_raise(action_order=action_order, raiser=acting_player)
-            # If no one left to act, the betting round ends.
-            if not players_yet_to_act:
+        
+        # Get the theoretical betting order for this phase
+        num_players = len(self.players)
+        order = BettingOrder.get_betting_order(num_players, self.phase)
+        
+        # Determine who acts first this round
+        first_to_act = order[0]  # Default to first in order
+        
+        # Track betting round state
+        last_raiser: Position | None = None
+        acted: set[Position] = set()
+        
+        while True:
+            progressed = False
+            
+            # Iterate through positions that can act
+            for pos in self.iter_action_order(order, start_from=first_to_act):
+                if pos in acted and last_raiser is None:
+                    # Everyone has acted since last raise; round ends
+                    break
+                
+                # Get the player at this position
+                acting_player = next((p for p in self.players if p.position == pos), None)
+                if not acting_player:
+                    continue
+                
+                # Get player action
+                game_state = self.get_game_state(action_on_player_id=acting_player.id)
+                selected_action, selected_amount, amount_to_call = self._get_player_action(
+                    acting_player=acting_player, game_state=game_state
+                )
+                
+                # Handle the action
+                result = self.handle_player_action(
+                    game_state=game_state,
+                    selected_action=selected_action,
+                    selected_amount=selected_amount,
+                    acting_player=acting_player,
+                    amount_to_call=amount_to_call,
+                    highest_bet=self.highest_bet
+                )
+                
+                progressed = True
+                acted.add(pos)
+                
+                # If this was a raise, reset the action tracking
+                if result == ActionType.RAISE:
+                    last_raiser = pos
+                    acted = set()  # Reset; everyone must respond
+                    first_to_act = self._next_in_order(order, pos)  # Continue after raiser
+                    break  # Restart loop so action continues after raiser
+            
+            if not progressed:
+                # No one could act; end round
+                break
+            
+            if last_raiser is None:
+                # Completed a lap with no raise
                 break
 
     def get_game_state(self, action_on_player_id: int = None, last_action: dict = None) -> GameState:
@@ -585,6 +608,84 @@ class Hand:
             big_blind=self.big_blind,
             dealer_position=dealer_position
         )
+    
+    def _position_can_act(self, pos: Position) -> bool:
+        """Returns True iff the seat is not folded, not all-in, and still facing action."""
+        # Find the player with this position
+        player = next((p for p in self.players if p.position == pos), None)
+        if not player:
+            return False
+        
+        if player.has_folded:
+            return False
+        if player.all_in:
+            return False
+        
+        # If there is a bet, seat must have option to act (hasn't called or cannot check)
+        return self._seat_still_has_action(player)
+
+    def _seat_still_has_action(self, player: Player) -> bool:
+        """Check if a player still has action to take."""
+        # If no bet to call, player can check (unless they already have)
+        if self.highest_bet == 0:
+            return not getattr(player, 'has_checked_this_round', False)
+        
+        # Facing a bet - check if they need to call
+        need_to_call = self.highest_bet - player.current_bet
+        return need_to_call > 0
+
+    def iter_action_order(
+        self,
+        order: list[Position],
+        start_from: Position | None = None,
+    ) -> Iterator[Position]:
+        """
+        Yields positions in table-driven 'order', optionally rotated to start
+        at 'start_from', filtering seats that cannot act right now.
+        
+        Args:
+            order: The theoretical betting order from BettingOrder
+            start_from: Optional position to start iteration from (for action continuation)
+            
+        Yields:
+            Positions where _position_can_act(pos) is True, in order
+        """
+        if not order:
+            return
+        
+        # Use deque for efficient rotation
+        from collections import deque
+        q = deque(order)
+        
+        if start_from is not None:
+            # Add safety check to prevent infinite loop
+            if start_from not in order:
+                raise ValueError(f"start_from position {start_from} not found in order {order}")
+            
+            # Rotate until start_from is at the beginning
+            while q[0] != start_from:
+                q.rotate(-1)
+        
+        # Track how many positions we've seen to prevent infinite loops
+        seen = 0
+        total = len(q)
+        
+        while seen < total:
+            pos = q[0]
+            q.rotate(-1)
+            seen += 1
+            
+            if self._position_can_act(pos):
+                yield pos
+
+    def _next_in_order(self, order: list[Position], pos: Position) -> Position:
+        """Get the next position after 'pos' in the betting order."""
+        try:
+            i = order.index(pos)
+            return order[(i + 1) % len(order)]
+        except ValueError:
+            # If position not found, return first position as fallback
+            return order[0] if order else None
             
     
 def log_action(
