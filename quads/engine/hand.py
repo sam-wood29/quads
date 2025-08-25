@@ -12,6 +12,8 @@ from quads.engine.game_state import GameState, PlayerState
 from quads.engine.hand_parser import parse_hole_cards
 from quads.engine.logger import get_logger
 from quads.engine.player import Player, Position
+from quads.engine.validated_action import ValidatedAction
+
 
 
 class Hand:
@@ -35,6 +37,15 @@ class Hand:
         self.step_number = 1
         self.phase: Phase
         self.logger = get_logger(__name__)
+        
+        self.highest_bet: int = 0 # Biggest contributed amount on current street
+        self.last_full_raise_increment: int = 0 # Size of last full raise (reopen threshold)
+        self.last_aggressor: Position | None = None  # Who made the last full raise
+        self.acted_since_last_full_raise: set[Position] = set()  # Who has acted since last full raise
+        
+        # Convert blinds to integers (cents) to avoid float precision issues
+        self.small_blind_cents = int(small_blind * 100)
+        self.big_blind_cents = int(big_blind * 100)
     
     def play(self):
         self.phase = Phase.DEAL
@@ -43,6 +54,10 @@ class Hand:
         self.players_in_button_order = self._assign_positions()
         self._post_blinds()
         self._deal_hole_cards()
+        
+        # Initialize script_index if script exists
+        if self.script and self.script_index is None:
+            self.script_index = 0
         
         # phase progression
         self.phase = Phase.PREFLOP
@@ -79,13 +94,19 @@ class Hand:
         
     def _reset_players(self):
         for p in self.players:
+            # Convert all player stacks to cents at hand start
+            p.stack = int(round(p.stack * 100)) if isinstance(p.stack, float) else p.stack
+            # Reset all betting amounts to 0 (in cents)
+            p.current_bet = 0
+            p.round_contrib = 0
+            p.hand_contrib = 0
+            # Reset flags
+            p.has_checked_this_round = False
+            p.all_in = False
             p.has_folded = False
-            p.round_contrib = 0.0
-            p.hand_contrib = 0.0
+            p.position = None
             p.hole_cards = None
             p.has_acted = False
-            p.all_in = False
-            p.position = None
         return self.players
     
     def _advance_dealer(self):
@@ -127,44 +148,60 @@ class Hand:
         return players_in_order
     
     def _post_blinds(self):
-        sb_amount = self.small_blind
-        bb_amount = self.big_blind
+        sb_amount = self.small_blind_cents
+        bb_amount = self.big_blind_cents
         ordered_player_list = self.players_in_button_order
+        
         if len(ordered_player_list) == 2:
             bb_player = ordered_player_list[1]
             sb_player = ordered_player_list[0]
         else:
             sb_player = ordered_player_list[1]
             bb_player = ordered_player_list[2]
+        
+        # Convert player stacks to cents if they aren't already
+        sb_player.stack = int(sb_player.stack * 100) if isinstance(sb_player.stack, float) else sb_player.stack
+        bb_player.stack = int(bb_player.stack * 100) if isinstance(bb_player.stack, float) else bb_player.stack
+        
         sb_paid = min(sb_amount, sb_player.stack)
         bb_paid = min(bb_amount, bb_player.stack)
+        
         sb_player.stack -= sb_paid
         sb_player.hand_contrib += sb_paid
         sb_player.round_contrib += sb_paid
         sb_player.current_bet += sb_paid
+        
         bb_player.stack -= bb_paid
         bb_player.hand_contrib += bb_paid
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
+        
         self.pot += (bb_paid + sb_paid)
+        
+        # Log actions (convert back to dollars for logging)
         conn = self.conn
         game_session_id = self.game_session_id
         hand_id = self.id
         step_number = self.step_number
+        
+        # Log SB
         player = sb_player
         action = ActionType.POST_SMALL_BLIND.value
-        amount = sb_paid
+        amount = sb_paid / 100  # Convert cents to dollars for logging
         phase = Phase.DEAL.value
         position = sb_player.position
-        sb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
-                   player=player, action=action, amount=amount, phase=phase, position=position)
+        sb_logged = log_action(conn=conn, game_session_id=game_session_id, hand_id=hand_id, step_number=step_number,
+               player=player, action=action, amount=amount, phase=phase, position=position)
         self.step_number += 1
-        player=bb_player
-        action=ActionType.POST_BIG_BLIND.value
-        amount=bb_paid
+        
+        # Log BB
+        player = bb_player
+        action = ActionType.POST_BIG_BLIND.value
+        amount = bb_paid / 100  # Convert cents to dollars for logging
         position = bb_player.position
-        bb_logged = log_action(conn=conn, game_session_id=game_session_id,hand_id=hand_id,step_number=step_number,
-                   player=player, action=action, amount=amount, phase=phase, position=position)
+        bb_logged = log_action(conn=conn, game_session_id=game_session_id, hand_id=hand_id, step_number=step_number,
+               player=player, action=action, amount=amount, phase=phase, position=position)
+        
         if not bb_logged or not sb_logged:
             raise RuntimeError("Error entering blinds posted into db.")
         
@@ -210,24 +247,6 @@ class Hand:
             if not success:
                 raise RuntimeError("Unable to log action while dealing hole cards.")
             
-    def _get_betting_round_action_order(self):
-        players = self.players_in_button_order
-        num_players = len(players)
-        if num_players == 2:
-            if self.phase == Phase.PREFLOP:
-                players_in_order = [players[0], players[1]]
-            else:
-                players_in_order = [players[1], players[0]]
-        else:
-            if self.phase == Phase.PREFLOP:
-                last_player = next(p for p in players if p.position == quads_player.Position.BB)
-            else:
-                last_player = next(p for p in players if p.position == quads_player.Position.BUTTON)
-            idx = players.index(last_player)
-            next_idx = (idx + 1) % num_players
-            players_in_order = players[next_idx:] + players[:next_idx]
-        return players_in_order
-    
     
     def _rebuild_players_yet_to_act_after_raise(self, action_order: list[Player], raiser: Player) -> list[Player]:
         highest_bet = self.highest_bet
@@ -244,38 +263,47 @@ class Hand:
                 ordered.append(candidate)
         return ordered
     
-    def _generate_raise_amounts(self, player: Player, min_raise, max_raise):
+    def _generate_raise_amounts(self, player: Player, min_raise: int, max_raise: int) -> list[int]:
+        """Generate valid raise amounts."""
         amounts = []
         current = min_raise
-        step = self.small_blind
-        while current <= max_raise and current <= player.stack:
+        step = self.small_blind_cents  # Use cents
+        
+        # Fix: max_to should be current_bet + stack (total amount player can raise to)
+        max_to = player.current_bet + player.stack
+        
+        while current <= max_to and current <= max_raise:
             amounts.append(current)
             current += step
+        
         return amounts
     
-    def _get_valid_actions(self, player:Player, amount_to_call:float):
+    def _get_valid_actions(self, player: Player, amount_to_call: int) -> dict:
+        """Get valid actions for a player."""
         if self.raise_settings != RaiseSetting.STANDARD:
             raise RuntimeError("Raise settings not implemented.")
+        
         va = {
             'actions': [],
             'raise_amounts': [],
         }
+        
         va["actions"].append(ActionType.FOLD)
+        
         if amount_to_call > 0:
             va["actions"].append(ActionType.CALL)
         else:
             va["actions"].append(ActionType.CHECK)
+        
         if player.stack > amount_to_call:
-            if self.last_raise_increment == 0:
-                min_raise_amount = self.big_blind
-                min_raise = self.highest_bet + min_raise_amount
-            else:
-                min_raise = self.highest_bet + self.last_raise_increment
+            min_raise = self.min_raise_to()
             max_raise = player.stack
+            
             if min_raise <= max_raise:
                 va["actions"].append(ActionType.RAISE)
-        va["raise_amounts"] = self._generate_raise_amounts(player=player, min_raise=min_raise, max_raise=max_raise)
-        return va, amount_to_call
+                va["raise_amounts"] = self._generate_raise_amounts(player, min_raise, max_raise)
+        
+        return va
             
         
     def _select_validate_action(self, ap: Player, valid_actions: dict):
@@ -285,13 +313,17 @@ class Hand:
                 if not ap.id == action["player"]:
                     raise ValueError ("Script mismatch.")
                 r_action = action["move"]
-                r_amount = action["amount"]
+                
+                # Convert script amounts to cents immediately for all actions
+                if "amount" in action:
+                    r_amount_cents = int(round(float(action["amount"]) * 100))
+                else:
+                    r_amount_cents = 0
             if action["type"] == 'test':
                 raise RuntimeError("test scipt 'Actions' not yet implemented.")
         else:
             raise RuntimeError("Unscripted play not implemented yet.")
-            # r_actions
-            # r_amount
+        
         match r_action:
             case "check":
                 r_action = ActionType.CHECK
@@ -301,7 +333,7 @@ class Hand:
                 r_action = ActionType.CALL
             case "raise":
                 r_action = ActionType.RAISE
-                if r_amount not in valid_actions["raise_amounts"]:
+                if r_amount_cents not in valid_actions["raise_amounts"]:
                     if self.script is not None:
                         raise ValueError("Invalid raise amount in script.")
                     else:
@@ -311,97 +343,70 @@ class Hand:
                 raise ValueError("Invalid action in script")
             else:
                 raise ValueError("Unscripted play not supported yet.")
-        return r_action, r_amount
+        return r_action, r_amount_cents
     
     def _get_player_action(self, acting_player: Player, game_state: GameState):
+        """Get player action from script or manual input."""
         ap = acting_player
         amount_to_call = self.highest_bet - ap.current_bet
-        valid_actions, amount_to_call = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
-        selected_action, selected_amount = self._select_validate_action(ap=ap,valid_actions=valid_actions)
+        valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
+        selected_action, selected_amount = self._select_validate_action(ap=ap, valid_actions=valid_actions)
         return selected_action, selected_amount, amount_to_call
     
-    def handle_player_action(self, game_state: GameState, selected_action: ActionType, selected_amount: float,
-                             acting_player: Player, amount_to_call: float, highest_bet: float):
-        player = acting_player
-        pot_before = self.pot
-        player_stack_before=acting_player.stack
-        if selected_action==ActionType.FOLD:
-            player.has_folded = True
-            total_bet = None
-        elif selected_action == ActionType.CALL:
-            if amount_to_call > player.stack:
-                print("Need to create a side pot here.")
-            call_amount = min(amount_to_call, player.stack)
-            player.stack -= call_amount
-            player.current_bet += call_amount
-            player.round_contrib += call_amount
-            self.pot += call_amount
-            total_bet = None
-        elif selected_action == ActionType.RAISE:
-            total_bet = selected_amount
-            additional_bet = total_bet - player.current_bet
-            prev_highest_bet = self.highest_bet
-            player.stack -= additional_bet
-            player.current_bet += additional_bet
-            player.round_contrib += additional_bet
-            self.pot += additional_bet
-            self.highest_bet = player.current_bet
-            # Update last_raise_increment only if this is a full raise (not an all-in for less)
-            raise_incr = self.highest_bet - prev_highest_bet
-            if prev_highest_bet == 0 or raise_incr >= getattr(self, "last_raise_increment", 0):
-                self.last_raise_increment = raise_incr
+    def handle_player_action(self, game_state: GameState, selected_action: ActionType, selected_amount: int,
+                         acting_player: Player, amount_to_call: int, highest_bet: int):
+        """Handle a player action with the new validation/application pattern."""
         
-        data = self._get_last_player_action_data(player=player)
-        if self.phase == Phase.PREFLOP:
-            hand_class=data.get("hand_class")
-            community_cards=None
-            score=None
-        else:
-            community_cards = self._get_community_cards(phase=self.phase)
-            ccs = community_cards
-            hand_cs = data.get("hole_cards")
-            score, hand_class = self._get_score(hand_cs=hand_cs, ccs=ccs)
-        if amount_to_call == 0:
-            percent_stack_to_call = None
-            pot_odds = None
-        else:
-            percent_stack_to_call = _calculate_pct_stack_to_call(p_stack=player_stack_before, amount_to_call=amount_to_call)
-            pot_odds = _calculate_pot_odds(amt_to_call=amount_to_call, c_pot=pot_before)
-            
-        log_action(
-            conn=self.conn,
-            game_session_id=self.game_session_id,
-            hand_id=self.id,
-            step_number=self.step_number,
-            player=acting_player,
-            position=acting_player.position,
-            phase=self.phase.value,
-            action=selected_action.value,
-            amount=selected_amount if selected_action in [ActionType.CALL, ActionType.RAISE] else None,
-            
-            hole_cards=data.get("hole_cards"),
-            hole_card1=data.get("hole_card1"),
-            hole_card2=data.get("hole_card2"),
-            community_cards=community_cards,
-            hand_rank_5=score,
-            hand_class=hand_class,
-            
-            pf_hand_class=data.get("pf_hand_class"),
-            high_rank=data.get("high_rank"),
-            low_rank=data.get("low_rank"),
-            is_pair=data.get("is_pair"),
-            is_suited=data.get("is_suited"),
-            gap=data.get("gap"),
-            chen_score=data.get("chen_score"),
-            
-            amount_to_call=amount_to_call,
-            percent_stack_to_call=percent_stack_to_call,
-            highest_bet=highest_bet,
-            pot_odds=pot_odds,
-            # detail=
-        )
+        # selected_amount is already in cents, just ensure it's an int
+        amount_cents = int(selected_amount) if selected_amount else 0
+        
+        # Validate the action
+        try:
+            validated = self.validate_action(acting_player, selected_action, amount_cents)
+        except ValueError as e:
+            # Log validation failure
+            self.logger.error(f"Action validation failed: {e}")
+            raise
+        
+        # Log before state
+        self._log_betting_state_before(acting_player, validated)
+        
+        # Apply the action
+        if validated.action_type == ActionType.FOLD:
+            self.apply_fold(acting_player, validated)
+        elif validated.action_type == ActionType.CHECK:
+            self.apply_check(acting_player, validated)
+        elif validated.action_type == ActionType.CALL:
+            self.apply_call(acting_player, validated)
+        elif validated.action_type == ActionType.RAISE:
+            if self.highest_bet == 0:
+                self.apply_bet(acting_player, validated)
+            else:
+                self.apply_raise(acting_player, validated)
+        
+        # Log after state
+        self._log_betting_state_after(acting_player, validated)
         
         return selected_action
+
+    def _log_betting_state_before(self, player: Player, validated: ValidatedAction):
+        """Log betting state before action."""
+        self.logger.debug(
+            f"Before action: {player.position} {validated.action_type.value} "
+            f"highest_bet={self.highest_bet}, "
+            f"last_full_raise_increment={self.last_full_raise_increment}, "
+            f"last_aggressor={self.last_aggressor}"
+        )
+
+    def _log_betting_state_after(self, player: Player, validated: ValidatedAction):
+        """Log betting state after action."""
+        self.logger.debug(
+            f"After action: {player.position} {validated.action_type.value} "
+            f"highest_bet={self.highest_bet}, "
+            f"last_full_raise_increment={self.last_full_raise_increment}, "
+            f"last_aggressor={self.last_aggressor}, "
+            f"reopen_action={validated.reopen_action}"
+        )
         
     
     def _get_score(self, hand_cs: str, ccs: str) -> tuple[int, int]:
@@ -500,32 +505,31 @@ class Hand:
 
 
     def _run_betting_round(self):
-        """Run a complete betting round using the new table-driven approach."""
-        if self.phase == Phase.PREFLOP:
-            self.last_raise_increment = self.big_blind
+        """Run a complete betting round using the new reopen logic."""
+        # Reset betting round state for new street
+        self._reset_betting_round_state()
         
         # Get the theoretical betting order for this phase
         num_players = len(self.players)
-        order = BettingOrder.get_betting_order(num_players, self.phase)
+        
+        # Pass the button position to get correct betting order
+        button_pos = Position.BUTTON  # ensure players have Position enum, not strings
+        order = BettingOrder.get_betting_order(num_players, self.phase, button_pos)
         
         # Determine who acts first this round
-        first_to_act = order[0]  # Default to first in order
-        
-        # Track betting round state
-        last_raiser: Position | None = None
-        acted: set[Position] = set()
+        first_to_act = order[0]
         
         while True:
             progressed = False
             
             # Iterate through positions that can act
             for pos in self.iter_action_order(order, start_from=first_to_act):
-                if pos in acted and last_raiser is None:
-                    # Everyone has acted since last raise; round ends
+                if pos in self.acted_since_last_full_raise and self.last_aggressor is None:
+                    # Everyone has acted since last raise (or from start); round ends
                     break
                 
                 # Get the player at this position
-                acting_player = next((p for p in self.players if p.position == pos), None)
+                acting_player = self._get_player_by_position(pos)
                 if not acting_player:
                     continue
                 
@@ -534,32 +538,36 @@ class Hand:
                 selected_action, selected_amount, amount_to_call = self._get_player_action(
                     acting_player=acting_player, game_state=game_state
                 )
-                
+
+                # selected_amount is already in cents from _select_validate_action
+                selected_amount_cents = selected_amount or 0
+
                 # Handle the action
                 result = self.handle_player_action(
                     game_state=game_state,
                     selected_action=selected_action,
-                    selected_amount=selected_amount,
+                    selected_amount=selected_amount_cents,  # Already in cents
                     acting_player=acting_player,
                     amount_to_call=amount_to_call,
                     highest_bet=self.highest_bet
                 )
                 
                 progressed = True
-                acted.add(pos)
                 
-                # If this was a raise, reset the action tracking
+                # If this was a full raise, restart iteration after the raiser
                 if result == ActionType.RAISE:
-                    last_raiser = pos
-                    acted = set()  # Reset; everyone must respond
-                    first_to_act = self._next_in_order(order, pos)  # Continue after raiser
-                    break  # Restart loop so action continues after raiser
+                    # Check if it was a full raise by looking at the validated action
+                    if self.last_aggressor == pos:  # This was a full raise
+                        first_to_act = self._next_in_order(order, pos)  # Continue after raiser
+                        break  # Restart loop so action continues after raiser
+                
+                # If no raise, continue with next player
             
             if not progressed:
                 # No one could act; end round
                 break
             
-            if last_raiser is None:
+            if self.last_aggressor is None:
                 # Completed a lap with no raise
                 break
 
@@ -626,13 +634,15 @@ class Hand:
 
     def _seat_still_has_action(self, player: Player) -> bool:
         """Check if a player still has action to take."""
-        # If no bet to call, player can check (unless they already have)
         if self.highest_bet == 0:
             return not getattr(player, 'has_checked_this_round', False)
         
-        # Facing a bet - check if they need to call
-        need_to_call = self.highest_bet - player.current_bet
-        return need_to_call > 0
+        need = self.highest_bet - player.current_bet
+        if need > 0:
+            return True  # must act
+        
+        # matched: has action only if there has been NO bet this street (preflop blinds don't count)
+        return (self.last_aggressor is None) and (not getattr(player, 'has_checked_this_round', False))
 
     def iter_action_order(
         self,
@@ -686,7 +696,221 @@ class Hand:
         except ValueError:
             # If position not found, return first position as fallback
             return order[0] if order else None
+        
+    def min_raise_to(self) -> int:
+        """
+        Single source of truth for minimum raise validation.
+        
+        If no bet yet (highest_bet == 0): first bet must be >= big_blind
+        If there is a bet: raise must be >= highest_bet + last_full_raise_increment
+        """
+        if self.highest_bet == 0:
+            return self.big_blind_cents
+        return self.highest_bet + self.last_full_raise_increment
+
+    def facing_to_call(self, pos: Position) -> int:
+        """How much a position needs to call."""
+        player = next((p for p in self.players if p.position == pos), None)
+        if not player:
+            return 0
+        return max(0, self.highest_bet - player.current_bet)
+
+    def can_reopen(self, raise_to: int) -> bool:
+        """Determine if a raise amount would reopen action."""
+        if self.highest_bet == 0:
+            # First bet of the street
+            return raise_to >= self.big_blind_cents
+        
+        raise_increment = raise_to - self.highest_bet
+        return raise_increment >= self.last_full_raise_increment
+
+    def _reset_betting_round_state(self):
+        """Reset betting round state for new street."""
+        self.last_aggressor = None
+        self.acted_since_last_full_raise.clear()
+        self.last_full_raise_increment = self.big_blind_cents
+        
+        if self.phase == Phase.PREFLOP:
+            # Preflop: blinds are already posted, so highest_bet should be BB
+            self.highest_bet = self.big_blind_cents
+        else:
+            # Postflop: no blinds, starts fresh
+            self.highest_bet = 0
+        
+        # Reset per-player per-street flags and betting state
+        for player in self.players:
+            if self.phase != Phase.PREFLOP:
+                # Postflop: reset current_bet to 0 (no blinds)
+                player.current_bet = 0
+            # Always reset the checked flag for new streets
+            if hasattr(player, 'has_checked_this_round'):
+                player.has_checked_this_round = False
+
+    def apply_bet(self, player: Player, validated: ValidatedAction) -> None:
+        """Apply a bet (first bet of the street)."""
+        if self.highest_bet != 0:
+            raise ValueError("apply_bet called when there's already a bet")
+        
+        bet_amount = validated.amount
+        additional_bet = bet_amount - player.current_bet
+        
+        # Update player state
+        player.stack -= additional_bet
+        player.current_bet += additional_bet
+        player.round_contrib += additional_bet
+        self.pot += additional_bet
+        
+        # Update betting state
+        self.highest_bet = bet_amount
+        
+        # Only update last_full_raise_increment if this is a full bet (>= BB)
+        if bet_amount >= self.big_blind_cents:
+            self.last_full_raise_increment = bet_amount
+        
+        # Treat first bet like a full raise for iteration purposes
+        self.last_aggressor = player.position
+        self.acted_since_last_full_raise.clear()  # Reopen action
+        self.acted_since_last_full_raise.add(player.position)  # Mark betting player as acted
+
+    def apply_raise(self, player: Player, validated: ValidatedAction) -> None:
+        """Apply a raise."""
+        if validated.action_type != ActionType.RAISE:
+            raise ValueError("apply_raise called with non-raise action")
+        
+        raise_to = validated.amount
+        additional_bet = raise_to - player.current_bet
+        
+        # Update player state
+        player.stack -= additional_bet
+        player.current_bet += raise_to
+        player.round_contrib += additional_bet
+        self.pot += additional_bet
+        
+        # Check for all-in
+        if player.stack == 0:
+            player.all_in = True
+        
+        # Update betting state
+        self.highest_bet = raise_to
+        
+        if validated.is_full_raise:
+            # Full raise - reopen action
+            self.last_full_raise_increment = validated.raise_increment
+            self.last_aggressor = player.position
+            self.acted_since_last_full_raise.clear()  # Reset acted tracking
+        else:
+            # Short raise (usually all-in) - don't reopen
+            # last_full_raise_increment stays the same
+            # last_aggressor stays the same
+            pass
+        
+        # Mark player as acted
+        self.acted_since_last_full_raise.add(player.position)
+
+    def apply_call(self, player: Player, validated: ValidatedAction) -> None:
+        """Apply a call."""
+        call_amount = validated.amount
+        
+        # Update player state
+        player.stack -= call_amount
+        player.current_bet += call_amount
+        player.round_contrib += call_amount
+        self.pot += call_amount
+        
+        # Check for all-in
+        if player.stack == 0:
+            player.all_in = True
+        
+        # Mark player as acted
+        self.acted_since_last_full_raise.add(player.position)
+
+    def apply_check(self, player: Player, validated: ValidatedAction) -> None:
+        """Apply a check."""
+        # Mark player as acted
+        self.acted_since_last_full_raise.add(player.position)
+        # Mark player as having checked this round
+        player.has_checked_this_round = True
+
+    def apply_fold(self, player: Player, validated: ValidatedAction) -> None:
+        """Apply a fold."""
+        player.has_folded = True
+        
+        # Mark player as acted
+        self.acted_since_last_full_raise.add(player.position)
+    
+    def validate_action(self, player: Player, action: ActionType, amount: int = 0) -> ValidatedAction:
+        """Validate an action before applying it."""
+        current_bet = player.current_bet
+        amount_to_call = self.highest_bet - current_bet
+        
+        if action == ActionType.FOLD:
+            return ValidatedAction(
+                action_type=ActionType.FOLD,
+                amount=0,
+                is_full_raise=False,
+                raise_increment=0,
+                reopen_action=False
+            )
+        
+        elif action == ActionType.CHECK:
+            if amount_to_call > 0:
+                raise ValueError(f"Cannot check when facing {amount_to_call} to call")
+            return ValidatedAction(
+                action_type=ActionType.CHECK,
+                amount=0,
+                is_full_raise=False,
+                raise_increment=0,
+                reopen_action=False
+            )
+        
+        elif action == ActionType.CALL:
+            if amount_to_call <= 0:
+                raise ValueError("Cannot call when no bet to call")
+            if amount_to_call > player.stack:
+                raise ValueError(f"Cannot call {amount_to_call} with stack {player.stack}")
+            return ValidatedAction(
+                action_type=ActionType.CALL,
+                amount=amount_to_call,
+                is_full_raise=False,
+                raise_increment=0,
+                reopen_action=False
+            )
+        
+        elif action == ActionType.RAISE:
+            if amount <= self.highest_bet:
+                raise ValueError(f"Raise amount {amount} must be greater than current bet {self.highest_bet}")
             
+            min_raise = self.min_raise_to()
+            if amount < min_raise:
+                raise ValueError(f"Raise amount {amount} must be at least {min_raise}")
+            
+            # Fix: Check if the additional amount needed is <= player's stack
+            additional_amount = amount - player.current_bet
+            if additional_amount <= 0:
+                raise ValueError(f"Raise amount {amount} must be greater than current bet {player.current_bet}")
+            if additional_amount > player.stack:
+                raise ValueError(f"Cannot raise to {amount} (additional {additional_amount}) with stack {player.stack}")
+            
+            raise_increment = amount - self.highest_bet
+            is_full_raise = raise_increment >= self.last_full_raise_increment
+            
+            return ValidatedAction(
+                action_type=ActionType.RAISE,
+                amount=amount,
+                is_full_raise=is_full_raise,
+                raise_increment=raise_increment,
+                reopen_action=is_full_raise
+            )
+        
+        else:
+            raise ValueError(f"Unknown action type: {action}")
+
+    def _get_player_by_position(self, pos: Position) -> Player | None:
+        """Get player by position."""
+        return next((p for p in self.players if p.position == pos), None)
+    
+    
+    
     
 def log_action(
     conn: sqlite3.Connection,

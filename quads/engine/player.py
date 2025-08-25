@@ -3,6 +3,7 @@ from enum import Enum
 
 from quads.engine.conn import get_conn
 from quads.engine.controller import Controller, ControllerType
+from quads.engine.validated_action import ValidatedAction
 
 
 class Player: 
@@ -10,10 +11,10 @@ class Player:
         self.id = id
         self.name = name
         self.controller = controller
-        self.stack = stack
-        self.round_contrib = 0.0
-        self.hand_contrib = 0.0
-        self.current_bet = 0.0
+        self.stack = int(stack * 100)  # Convert to cents
+        self.round_contrib = 0  # Use cents
+        self.hand_contrib = 0   # Use cents
+        self.current_bet = 0    # Use cents
         self.hole_cards = None
         self.has_acted = False
         self.has_folded = False
@@ -22,7 +23,7 @@ class Player:
         self.seat_index = seat_index
     
     def __str__(self) -> str:
-        return f"{self.id}, {self.name}, {self.stack}, {self.position}, {self.controller.controller_type}"
+        return f"{self.id}, {self.name}, {self.stack/100:.2f}, {self.position}, {self.controller.controller_type}"
     
 class Position(str, Enum):
     BUTTON = "button"

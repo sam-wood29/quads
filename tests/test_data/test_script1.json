@@ -21,7 +21,8 @@
         { "type": "deal_hole", "player": "6", "cards": ["2s", "2c"] },
         { "type": "deal_hole", "player": "1", "cards": ["As", "Ac"] },
         
-        { "type": "action", "player": 4, "move": "call", "amount": 0 },
+        { "type": "action", "player": 4, "move": "call" },
+        { "type": "aciton", "player": 5, "move": "raise", "amount": 150 },
         
         { "type": "deal_community", "cards": ["5s", "5d", "5h"] }
     ]
