@@ -1,0 +1,27 @@
+{
+    "script_name": "test_phases_full.json",
+    "rebuy_setting": "one_left",
+    "same_stack": true,
+    "stack_amount": 20,
+    "small_blind": 0.25,
+    "big_blind": 0.5,
+    "players": [
+        {"id": 1, "status": "exists"},
+        {"id": 2, "status": "exists"}
+    ],
+    "script": [
+        {"type": "deal_hole", "player": "1", "cards": ["As", "Ac"]},
+        {"type": "deal_hole", "player": "2", "cards": ["Ks", "Kc"]},
+        {"type": "action", "player": 1, "move": "call"},
+        {"type": "action", "player": 2, "move": "check"},
+        {"type": "deal_community", "cards": ["Ah", "Kh", "Qh"]},
+        {"type": "action", "player": 1, "move": "check"},
+        {"type": "action", "player": 2, "move": "check"},
+        {"type": "deal_community", "cards": ["Jh"]},
+        {"type": "action", "player": 1, "move": "check"},
+        {"type": "action", "player": 2, "move": "check"},
+        {"type": "deal_community", "cards": ["Th"]},
+        {"type": "action", "player": 1, "move": "check"},
+        {"type": "action", "player": 2, "move": "check"}
+    ]
+}

@@ -14,6 +14,8 @@ from quads.engine.logger import get_logger
 from quads.engine.player import Player, Position
 from quads.engine.validated_action import ValidatedAction
 
+from .phase_controller import PhaseController
+
 
 class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
@@ -34,7 +36,6 @@ class Hand:
         self.community_cards: list[int] = []
         self.pot = 0.0
         self.step_number = 1
-        self.phase: Phase
         self.logger = get_logger(__name__)
         
         self.highest_bet: int = 0 # Biggest contributed amount on current street
@@ -45,9 +46,77 @@ class Hand:
         # Convert blinds to integers (cents) to avoid float precision issues
         self.small_blind_cents = int(small_blind * 100)
         self.big_blind_cents = int(big_blind * 100)
+        
+        # Initialize game state with a default phase first
+        self.game_state = self._create_initial_game_state()
+        self.phase_controller = PhaseController(self.game_state, self.conn)
+        
+        # Set initial phase
+        self.phase = Phase.DEAL
+    
+    def _create_initial_game_state(self) -> GameState:
+        """Create initial game state without circular dependency."""
+        player_states = []
+        for p in self.players:
+            # Convert integer hole cards to string if needed
+            if p.hole_cards and isinstance(p.hole_cards, list):
+                from quads.deuces.card import Card
+                hole_cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in p.hole_cards]
+            else:
+                hole_cards = None
+            player_states.append(PlayerState(
+                id=p.id,
+                name=p.name,
+                stack=p.stack,
+                position=str(p.position) if p.position else None,
+                hole_cards=hole_cards,
+                has_folded=p.has_folded,
+                is_all_in=p.all_in,
+                current_bet=p.current_bet,
+                round_contrib=p.round_contrib,
+                hand_contrib=p.hand_contrib
+            ))
+        
+        # Add community card attribute to Hand Class
+        community_cards = []
+        if self.community_cards:
+            community_cards = [Card.int_to_str(c) for c in self.community_cards]
+            
+        dealer_position = ""
+        if self.dealer_index is not None:
+            dealer_player = next((p for p in self.players if p.seat_index == self.dealer_index), None)
+            if dealer_player:
+                dealer_position = str(dealer_player.position)
+        
+        return GameState(
+            hand_id=self.id,
+            phase=Phase.DEAL.value,  # Start with DEAL phase
+            pot=self.pot,
+            community_cards=community_cards,
+            players=player_states,
+            action_on=None,
+            last_action=None,
+            min_raise=getattr(self, 'min_raise', 0.0),
+            max_raise=getattr(self, 'max_raise', 0.0),
+            small_blind=self.small_blind,
+            big_blind=self.big_blind,
+            dealer_position=dealer_position
+        )
+
+    @property
+    def phase(self):
+        """Expose phase from game_state for backward compatibility."""
+        return Phase(self.game_state.phase)
+    
+    @phase.setter
+    def phase(self, value):
+        """Set phase through game_state."""
+        self.game_state.phase = value.value if isinstance(value, Phase) else value
     
     def play(self):
-        self.phase = Phase.DEAL
+        # Use phase controller for all phase transitions
+        self.phase_controller.enter_phase(Phase.DEAL)
+        
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
@@ -58,35 +127,34 @@ class Hand:
         if self.script and self.script_index is None:
             self.script_index = 0
         
-        # phase progression
-        self.phase = Phase.PREFLOP
+        # Phase progression using controller
+        self.phase_controller.enter_phase(Phase.PREFLOP)
         self._run_betting_round()
         
-        # Deal flop if more than one player remains
+        # Check if hand continues
         remaining_players = [p for p in self.players if not p.has_folded]
         if len(remaining_players) > 1:
-            self.phase = Phase.FLOP
+            self.phase_controller.enter_phase(Phase.FLOP)
             self._apply_community_deal(Phase.FLOP)
             self._run_betting_round()
             
-            # deal turn if more than one player left
             remaining_players = [p for p in self.players if not p.has_folded]
             if len(remaining_players) > 1:
-                self.phase = Phase.TURN
+                self.phase_controller.enter_phase(Phase.TURN)
                 self._apply_community_deal(Phase.TURN)
                 self._run_betting_round()
             
-                # Deal river if more than one player remains
                 remaining_players = [p for p in self.players if not p.has_folded]
                 if len(remaining_players) > 1:
-                    self.phase = Phase.RIVER
+                    self.phase_controller.enter_phase(Phase.RIVER)
                     self._apply_community_deal(Phase.RIVER)
                     self._run_betting_round()
+        
         # Showdown
-        self.phase = Phase.SHOWDOWN
+        self.phase_controller.enter_phase(Phase.SHOWDOWN)
         # TODO: Implement showdown logic
         
-        return self.players, self.id, self.deck, False, self.script, self.dealer_index    
+        return self.players, self.id, self.deck, False, self.script, self.dealer_index
         
     def play_manual(self):
         raise RuntimeError("Manual Play not implemented yet.")
@@ -505,14 +573,14 @@ class Hand:
 
     def _run_betting_round(self):
         """Run a complete betting round using the new reopen logic."""
-        # Reset betting round state for new street
-        self._reset_betting_round_state()
+        # Use phase controller to start betting round
+        self.phase_controller.start_betting_round()
         
         # Get the theoretical betting order for this phase
         num_players = len(self.players)
         
         # Pass the button position to get correct betting order
-        button_pos = Position.BUTTON  # ensure players have Position enum, not strings
+        button_pos = Position.BUTTON
         order = BettingOrder.get_betting_order(num_players, self.phase, button_pos)
         
         # Determine who acts first this round
@@ -545,7 +613,7 @@ class Hand:
                 result = self.handle_player_action(
                     game_state=game_state,
                     selected_action=selected_action,
-                    selected_amount=selected_amount_cents,  # Already in cents
+                    selected_amount=selected_amount_cents,
                     acting_player=acting_player,
                     amount_to_call=amount_to_call,
                     highest_bet=self.highest_bet
@@ -553,14 +621,16 @@ class Hand:
                 
                 progressed = True
                 
+                # Check if street should close after this action
+                if self.phase_controller.maybe_close_street_and_advance():
+                    # Street closed, exit betting round
+                    return
+                
                 # If this was a full raise, restart iteration after the raiser
                 if result == ActionType.RAISE:
-                    # Check if it was a full raise by looking at the validated action
                     if self.last_aggressor == pos:  # This was a full raise
-                        first_to_act = self._next_in_order(order, pos)  # Continue after raiser
+                        first_to_act = self._next_in_order(order, pos)
                         break  # Restart loop so action continues after raiser
-                
-                # If no raise, continue with next player
             
             if not progressed:
                 # No one could act; end round
@@ -630,7 +700,7 @@ class Hand:
         
         # If there is a bet, seat must have option to act (hasn't called or cannot check)
         return self._seat_still_has_action(player)
-
+    
     def _seat_still_has_action(self, player: Player) -> bool:
         """Check if a player still has action to take."""
         if self.highest_bet == 0:
@@ -916,8 +986,8 @@ def log_action(
     game_session_id: int,
     hand_id: int,
     step_number: int,
-    player: Player,
-    action: str,
+    player: Player = None,  # Changed from player_id
+    action: str = None,
     amount: float = None,
     phase: str = None,
     hole_cards: str = None,
@@ -942,6 +1012,10 @@ def log_action(
 ) -> bool:
     try:
         cur = conn.cursor()
+        
+        # Handle player_id (can be None for phase advances)
+        player_id = player.id if player else None
+        
         cur.execute("""
             INSERT INTO actions (
                 game_session_id, hand_id, step_number, player_id, position, phase, action, amount,
@@ -950,7 +1024,7 @@ def log_action(
                 amount_to_call, percent_stack_to_call, highest_bet, pot_odds, detail
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            game_session_id, hand_id, step_number, player.id, position, phase, action, amount,
+            game_session_id, hand_id, step_number, player_id, position, phase, action, amount,
             hole_cards, hole_card1, hole_card2, community_cards,
             hand_rank_5, hand_class, pf_hand_class, high_rank, low_rank, is_pair, is_suited, gap, chen_score,
             amount_to_call, percent_stack_to_call, highest_bet, pot_odds, detail

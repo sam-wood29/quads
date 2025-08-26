@@ -55,7 +55,10 @@ def test_community_cards_methods_directly():
 def test_community_cards_single_source_of_truth():
     """Test that community_cards list is the single source of truth"""
     
-    # Create a minimal hand object
+    # Create a minimal hand object with proper initialization
+    from unittest.mock import Mock
+
+    
     hand = Hand.__new__(Hand)
     hand.community_cards = []
     hand.script = [
@@ -64,6 +67,10 @@ def test_community_cards_single_source_of_truth():
         {"type": "deal_community", "cards": ["Th"]},               # River
     ]
     hand.script_index = 0
+    
+    # Create a minimal game_state to avoid AttributeError
+    hand.game_state = Mock()
+    hand.game_state.phase = Phase.DEAL.value
     
     # Verify initial state
     assert hand.community_cards == [], "Community cards should start empty"
@@ -92,7 +99,9 @@ def test_community_cards_single_source_of_truth():
 def test_no_reparsing_of_cards():
     """Test that cards are not re-parsed when evaluating hands"""
     
-    # Create a minimal hand object
+    # Create a minimal hand object with proper initialization
+    from unittest.mock import Mock
+    
     hand = Hand.__new__(Hand)
     hand.community_cards = []
     hand.script = [
@@ -101,6 +110,10 @@ def test_no_reparsing_of_cards():
         {"type": "deal_community", "cards": ["Th"]},               # River
     ]
     hand.script_index = 0
+    
+    # Create a minimal game_state to avoid AttributeError
+    hand.game_state = Mock()
+    hand.game_state.phase = Phase.DEAL.value
     
     # Deal community cards
     hand.phase = Phase.FLOP

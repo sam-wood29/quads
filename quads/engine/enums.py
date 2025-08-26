@@ -21,6 +21,7 @@ class ActionType(str, Enum):
     WIN_POT = "win_pot"
     POST_SMALL_BLIND = "post_small_blind"
     POST_BIG_BLIND = "post_big_blind"
+    PHASE_ADVANCE = "phase_advance"
 
 
 class RaiseSetting(Enum):
