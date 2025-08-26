@@ -1,9 +1,10 @@
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, patch
 
 from quads.deuces.deck import Deck
+from quads.engine.enums import ActionType, Phase, RaiseSetting
 from quads.engine.hand import Hand
-from quads.engine.enums import Phase, ActionType, RaiseSetting
 from quads.engine.player import Player, Position
 from quads.engine.validated_action import ValidatedAction
 

@@ -3,7 +3,6 @@ from enum import Enum
 
 from quads.engine.conn import get_conn
 from quads.engine.controller import Controller, ControllerType
-from quads.engine.validated_action import ValidatedAction
 
 
 class Player: 

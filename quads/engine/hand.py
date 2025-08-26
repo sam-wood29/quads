@@ -15,7 +15,6 @@ from quads.engine.player import Player, Position
 from quads.engine.validated_action import ValidatedAction
 
 
-
 class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
                   conn: sqlite3.Connection, script: dict | None = None, 
