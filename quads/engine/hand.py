@@ -32,7 +32,7 @@ class Hand:
         self.raise_settings = raise_settings
         self.small_blind = small_blind
         self.big_blind = big_blind
-        self.script_index = script_index
+        self.script_index = script_index if script_index is not None else 0  # Initialize to 0 if None
         self.community_cards: list[int] = []
         self.pot = 0.0
         self.step_number = 1
@@ -100,7 +100,8 @@ class Hand:
             max_raise=getattr(self, 'max_raise', 0.0),
             small_blind=self.small_blind,
             big_blind=self.big_blind,
-            dealer_position=dealer_position
+            dealer_position=dealer_position,
+            game_session_id=self.game_session_id  # Add this missing field
         )
 
     @property
@@ -117,15 +118,15 @@ class Hand:
         # Use phase controller for all phase transitions
         self.phase_controller.enter_phase(Phase.DEAL)
         
+        # Initialize script_index if script exists
+        if self.script and self.script_index is None:
+            self.script_index = 0
+        
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
         self._post_blinds()
         self._deal_hole_cards()
-        
-        # Initialize script_index if script exists
-        if self.script and self.script_index is None:
-            self.script_index = 0
         
         # Phase progression using controller
         self.phase_controller.enter_phase(Phase.PREFLOP)
@@ -282,11 +283,15 @@ class Hand:
         
     def _deal_hole_cards(self):
         players = self.players_in_button_order
+        print(f"DEBUG: players_in_button_order = {[p.id for p in players]}")
         n = 1 % len(players)
+        print(f"DEBUG: n = {n}")
         rotated_players = players[n:] + players[:n]
+        print(f"DEBUG: rotated_players = {[p.id for p in rotated_players]}")
         for p in rotated_players:
             if self.script is not None: # scripted game
                 script = self._get_next_script_action()
+                print(f"DEBUG: p.id={p.id}, script['player']={script['player']}, int(script['player'])={int(script['player'])}")
                 if p.id != int(script['player']):
                     raise RuntimeError("Script / Game mismatch.")
                 card_strings = script['cards']

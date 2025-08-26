@@ -157,12 +157,12 @@ class PhaseController:
     
     def _log_pot_award(self, winner_id: int, amount: float) -> None:
         """Log pot award action."""
-        from .hand import log_action
+        import quads.engine.hand as hand_module
         
         # Find the winner player object
         winner = next((p for p in self.state.players if p.id == winner_id), None)
         
-        log_action(
+        hand_module.log_action(
             conn=self.conn,
             game_session_id=self.state.game_session_id,
             hand_id=self.state.hand_id,
@@ -176,7 +176,7 @@ class PhaseController:
     
     def _log_phase_advance(self, to_phase: Phase, from_phase: Phase) -> None:
         """Log phase advance to database."""
-        from .hand import log_action
+        import quads.engine.hand as hand_module
         
         detail = {
             "from": from_phase.value,
@@ -184,7 +184,7 @@ class PhaseController:
             "street_number": self.state.street_number
         }
         
-        log_action(
+        hand_module.log_action(
             conn=self.conn,
             game_session_id=self.state.game_session_id,
             hand_id=self.state.hand_id,
