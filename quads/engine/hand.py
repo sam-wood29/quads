@@ -13,6 +13,8 @@ from quads.engine.hand_parser import parse_hole_cards
 from quads.engine.logger import get_logger
 from quads.engine.player import Player, Position
 from quads.engine.validated_action import ValidatedAction
+from quads.engine.money import to_cents
+from quads.engine.pot_manager import PotManager
 
 from .phase_controller import PhaseController
 
@@ -43,9 +45,15 @@ class Hand:
         self.last_aggressor: Position | None = None  # Who made the last full raise
         self.acted_since_last_full_raise: set[Position] = set()  # Who has acted since last full raise
         
+        # Initialize pot manager with player IDs
+        self.pot_manager = PotManager({p.id for p in self.players})
+        
+        # Initialize players in button order (will be updated in play() if needed)
+        self.players_in_button_order = self._assign_positions()
+        
         # Convert blinds to integers (cents) to avoid float precision issues
-        self.small_blind_cents = int(small_blind * 100)
-        self.big_blind_cents = int(big_blind * 100)
+        self.small_blind_cents = to_cents(small_blind)
+        self.big_blind_cents = to_cents(big_blind)
         
         # Initialize game state with a default phase first
         self.game_state = self._create_initial_game_state()
@@ -74,7 +82,11 @@ class Hand:
                 is_all_in=p.all_in,
                 current_bet=p.current_bet,
                 round_contrib=p.round_contrib,
-                hand_contrib=p.hand_contrib
+                hand_contrib=p.hand_contrib,
+                # Initialize cents fields from existing data
+                stack_cents=p.stack,
+                current_bet_cents=p.current_bet,
+                committed_cents=p.hand_contrib
             ))
         
         # Add community card attribute to Hand Class
@@ -101,7 +113,10 @@ class Hand:
             small_blind=self.small_blind,
             big_blind=self.big_blind,
             dealer_position=dealer_position,
-            game_session_id=self.game_session_id  # Add this missing field
+            game_session_id=self.game_session_id,  # Add this missing field
+            # Initialize cents fields from existing data
+            pot_cents=int(self.pot),
+            bet_to_call_cents=0
         )
 
     @property
@@ -234,17 +249,20 @@ class Hand:
         sb_paid = min(sb_amount, sb_player.stack)
         bb_paid = min(bb_amount, bb_player.stack)
         
+        # Update player state and pot manager
         sb_player.stack -= sb_paid
         sb_player.hand_contrib += sb_paid
         sb_player.round_contrib += sb_paid
         sb_player.current_bet += sb_paid
+        self.pot_manager.post(sb_player.id, sb_paid)
         
         bb_player.stack -= bb_paid
         bb_player.hand_contrib += bb_paid
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
+        self.pot_manager.post(bb_player.id, bb_paid)
         
-        self.pot += (bb_paid + sb_paid)
+        self.pot += (bb_paid + sb_paid) / 100  # Keep float pot for backward compatibility
         
         # Log actions (convert back to dollars for logging)
         conn = self.conn
@@ -628,7 +646,11 @@ class Hand:
                 
                 # Check if street should close after this action
                 if self.phase_controller.maybe_close_street_and_advance():
-                    # Street closed, exit betting round
+                    # Street closed, handle uncalled bets before exiting
+                    if self.last_aggressor:
+                        aggressor = self._get_player_by_position(self.last_aggressor)
+                        if aggressor:
+                            self._return_uncalled_bet(aggressor)
                     return
                 
                 # If this was a full raise, restart iteration after the raiser
@@ -644,6 +666,12 @@ class Hand:
             if self.last_aggressor is None:
                 # Completed a lap with no raise
                 break
+        
+        # Handle uncalled bets at end of betting round
+        if self.last_aggressor:
+            aggressor = self._get_player_by_position(self.last_aggressor)
+            if aggressor:
+                self._return_uncalled_bet(aggressor)
 
     def get_game_state(self, action_on_player_id: int = None, last_action: dict = None) -> GameState:
         player_states = []
@@ -832,7 +860,13 @@ class Hand:
         player.stack -= additional_bet
         player.current_bet += additional_bet
         player.round_contrib += additional_bet
-        self.pot += additional_bet
+        player.hand_contrib += additional_bet
+        
+        # Update pot manager
+        self.pot_manager.post(player.id, additional_bet)
+        
+        # Update float pot for backward compatibility
+        self.pot += additional_bet / 100
         
         # Update betting state
         self.highest_bet = bet_amount
@@ -854,11 +888,24 @@ class Hand:
         raise_to = validated.amount
         additional_bet = raise_to - player.current_bet
         
+        # Handle all-in scenario
+        if additional_bet > player.stack:
+            # Cap the raise to what the player can afford
+            actual_raise_to = player.current_bet + player.stack
+            additional_bet = player.stack
+            player.all_in = True
+        
         # Update player state
         player.stack -= additional_bet
-        player.current_bet += raise_to
+        player.current_bet += additional_bet
         player.round_contrib += additional_bet
-        self.pot += additional_bet
+        player.hand_contrib += additional_bet
+        
+        # Update pot manager
+        self.pot_manager.post(player.id, additional_bet)
+        
+        # Update float pot for backward compatibility
+        self.pot += additional_bet / 100
         
         # Check for all-in
         if player.stack == 0:
@@ -889,7 +936,13 @@ class Hand:
         player.stack -= call_amount
         player.current_bet += call_amount
         player.round_contrib += call_amount
-        self.pot += call_amount
+        player.hand_contrib += call_amount
+        
+        # Update pot manager
+        self.pot_manager.post(player.id, call_amount)
+        
+        # Update float pot for backward compatibility
+        self.pot += call_amount / 100
         
         # Check for all-in
         if player.stack == 0:
@@ -909,9 +962,42 @@ class Hand:
         """Apply a fold."""
         player.has_folded = True
         
+        # Mark player as folded in pot manager
+        self.pot_manager.mark_folded(player.id)
+        
         # Mark player as acted
         self.acted_since_last_full_raise.add(player.position)
-    
+
+    def _return_uncalled_bet(self, aggressor: Player) -> None:
+        """Return uncalled portion of a bet to the aggressor."""
+        if not aggressor:
+            return
+        
+        # Find other players who haven't folded
+        other_players = [p for p in self.players if not p.has_folded and p != aggressor]
+        
+        if not other_players:
+            # Everyone folded - return entire bet minus blinds
+            uncalled_amount = aggressor.current_bet - self.big_blind_cents
+        else:
+            # Some players called - calculate uncalled portion
+            uncalled_amount = self.highest_bet - max(p.current_bet for p in other_players)
+        
+        if uncalled_amount <= 0:
+            return  # No uncalled portion
+        
+        # Return the uncalled amount to the aggressor
+        aggressor.stack += uncalled_amount
+        aggressor.hand_contrib -= uncalled_amount
+        
+        # Update pot manager
+        self.pot_manager.contributed[aggressor.id] -= uncalled_amount
+        
+        # Update float pot for backward compatibility
+        self.pot -= uncalled_amount / 100
+        
+        self.logger.info(f"Returned {uncalled_amount} cents uncalled bet to {aggressor.id}")
+
     def validate_action(self, player: Player, action: ActionType, amount: int = 0) -> ValidatedAction:
         """Validate an action before applying it."""
         current_bet = player.current_bet
@@ -958,10 +1044,8 @@ class Hand:
             if amount < min_raise:
                 raise ValueError(f"Raise amount {amount} must be at least {min_raise}")
             
-            # Fix: Check if the additional amount needed is <= player's stack
+            # Check if player can afford the raise
             additional_amount = amount - player.current_bet
-            if additional_amount <= 0:
-                raise ValueError(f"Raise amount {amount} must be greater than current bet {player.current_bet}")
             if additional_amount > player.stack:
                 raise ValueError(f"Cannot raise to {amount} (additional {additional_amount}) with stack {player.stack}")
             

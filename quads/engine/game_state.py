@@ -1,6 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
 
+from quads.engine.money import Cents
+
 
 @dataclass
 class PlayerState:
@@ -14,6 +16,11 @@ class PlayerState:
     current_bet: float
     round_contrib: float
     hand_contrib: float
+    
+    # New cents fields (parallel to existing float fields)
+    stack_cents: Cents = 0
+    committed_cents: Cents = 0  # this hand
+    current_bet_cents: Cents = 0  # this street
 
 @dataclass
 class GameState:
@@ -43,6 +50,10 @@ class GameState:
     committed_this_round: dict[int, float] = None
     actionable_seats: deque = None
     awarded_uncontested: bool = False
+    
+    # New cents fields (parallel to existing float fields)
+    pot_cents: Cents = 0
+    bet_to_call_cents: Cents = 0
     
     def __post_init__(self):
         if self.acted_this_round is None:
