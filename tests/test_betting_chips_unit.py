@@ -1,9 +1,10 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
 
 from quads.engine.enums import ActionType, RaiseSetting
 from quads.engine.hand import Hand
-from quads.engine.money import Cents, to_cents
+from quads.engine.money import to_cents
 from quads.engine.player import Player, Position
 from quads.engine.validated_action import ValidatedAction
 

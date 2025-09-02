@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
 
 from quads.deuces.deck import Deck
 from quads.engine.enums import RaiseSetting
 from quads.engine.hand import Hand
-from quads.engine.money import Cents, to_cents
+from quads.engine.money import to_cents
 from quads.engine.player import Player, Position
 
 

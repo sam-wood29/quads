@@ -5,13 +5,12 @@ This module provides safe money primitives for converting between
 dollar amounts and integer cents, with validation and formatting.
 """
 
-from typing import Union
 
 # Type alias for cents - all internal arithmetic uses this
 cents = int
 
 
-def to_cents(amount: Union[float, str, int]) -> cents:
+def to_cents(amount: float | str | int) -> cents:
     """
     Convert dollar amount to cents.
     

@@ -5,17 +5,16 @@ This module handles the distribution of chips from pots to winners,
 ensuring no cents are lost and ties are handled correctly.
 """
 
-from typing import Dict, List, Set, Iterable, Tuple
 
 from .money import Cents
 from .pot_manager import Pot
 
 
 def resolve_payouts(
-    pots: List[Pot],
-    ranks: Dict[int, int],           # player_id -> rank (1,2,3...) among remaining
-    seat_order: List[int],           # stable tie-break for $0.01 remainders
-) -> Dict[int, Cents]:               # player_id -> won_cents
+    pots: list[Pot],
+    ranks: dict[int, int],           # player_id -> rank (1,2,3...) among remaining
+    seat_order: list[int],           # stable tie-break for $0.01 remainders
+) -> dict[int, Cents]:               # player_id -> won_cents
     """
     Resolve payouts from pots based on showdown ranks.
     
@@ -32,7 +31,7 @@ def resolve_payouts(
         - Any 1-cent remainders go to earliest seat index (stable rule)
         - No cents are lost in the distribution
     """
-    payouts: Dict[int, Cents] = {pid: 0 for pid in ranks}
+    payouts: dict[int, Cents] = {pid: 0 for pid in ranks}
     
     for pot in pots:
         # Find players eligible for this pot who also have ranks
@@ -64,9 +63,9 @@ def resolve_payouts(
 
 
 def validate_payouts(
-    pots: List[Pot],
-    payouts: Dict[int, Cents],
-    ranks: Dict[int, int],
+    pots: list[Pot],
+    payouts: dict[int, Cents],
+    ranks: dict[int, int],
 ) -> bool:
     """
     Validate that payouts are correct.
@@ -101,8 +100,8 @@ def validate_payouts(
 
 def get_pot_winners(
     pot: Pot,
-    ranks: Dict[int, int],
-) -> List[int]:
+    ranks: dict[int, int],
+) -> list[int]:
     """
     Get the winners of a specific pot.
     
@@ -127,7 +126,7 @@ def get_pot_winners(
 def calculate_pot_share(
     pot_amount: Cents,
     num_winners: int,
-) -> Tuple[Cents, Cents]:
+) -> tuple[Cents, Cents]:
     """
     Calculate equal share and remainder for a pot.
     

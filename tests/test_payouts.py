@@ -5,17 +5,16 @@ This module handles the distribution of chips from pots to winners,
 ensuring no cents are lost and ties are handled correctly.
 """
 
-from typing import Dict, List, Set, Iterable, Tuple
 
 from quads.engine.money import Cents
 from quads.engine.pot_manager import Pot
 
 
 def resolve_payouts(
-    pots: List[Pot],
-    ranks: Dict[int, int],           # player_id -> rank (1,2,3...) among remaining
-    seat_order: List[int],           # stable tie-break for $0.01 remainders
-) -> Dict[int, Cents]:               # player_id -> won_cents
+    pots: list[Pot],
+    ranks: dict[int, int],           # player_id -> rank (1,2,3...) among remaining
+    seat_order: list[int],           # stable tie-break for $0.01 remainders
+) -> dict[int, Cents]:               # player_id -> won_cents
     """
     Resolve payouts from pots based on showdown ranks.
     
@@ -32,7 +31,7 @@ def resolve_payouts(
         - Any 1-cent remainders go to earliest seat index (stable rule)
         - No cents are lost in the distribution
     """
-    payouts: Dict[int, Cents] = {pid: 0 for pid in ranks}
+    payouts: dict[int, Cents] = {pid: 0 for pid in ranks}
     
     for pot in pots:
         # Find players eligible for this pot who also have ranks
@@ -64,9 +63,9 @@ def resolve_payouts(
 
 
 def validate_payouts(
-    pots: List[Pot],
-    payouts: Dict[int, Cents],
-    ranks: Dict[int, int],
+    pots: list[Pot],
+    payouts: dict[int, Cents],
+    ranks: dict[int, int],
 ) -> bool:
     """
     Validate that payouts are correct.
@@ -102,8 +101,8 @@ def validate_payouts(
 
 def get_pot_winners(
     pot: Pot,
-    ranks: Dict[int, int],
-) -> List[int]:
+    ranks: dict[int, int],
+) -> list[int]:
     """
     Get the winners of a specific pot.
     
@@ -128,7 +127,7 @@ def get_pot_winners(
 def calculate_pot_share(
     pot_amount: Cents,
     num_winners: int,
-) -> Tuple[Cents, Cents]:
+) -> tuple[Cents, Cents]:
     """
     Calculate equal share and remainder for a pot.
     
@@ -148,10 +147,14 @@ def calculate_pot_share(
     return share, remainder
 
 
-import pytest
 
 from quads.engine.money import Cents
-from quads.engine.payouts import resolve_payouts, validate_payouts, get_pot_winners, calculate_pot_share
+from quads.engine.payouts import (
+    calculate_pot_share,
+    get_pot_winners,
+    resolve_payouts,
+    validate_payouts,
+)
 from quads.engine.pot_manager import Pot
 
 
@@ -403,7 +406,6 @@ class TestPayouts:
     
     def test_get_pot_winners(self):
         """Test get_pot_winners helper function."""
-        from quads.engine.payouts import get_pot_winners
         
         pot = Pot(amount_cents=1000, eligible={1, 2, 3})
         ranks = {1: 1, 2: 1, 3: 2}  # Players 1 and 2 tie for best
@@ -415,7 +417,6 @@ class TestPayouts:
     
     def test_calculate_pot_share(self):
         """Test calculate_pot_share helper function."""
-        from quads.engine.payouts import calculate_pot_share
         
         # Test even division
         share, remainder = calculate_pot_share(1000, 2)

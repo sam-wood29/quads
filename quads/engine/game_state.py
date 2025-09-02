@@ -8,16 +8,16 @@ from quads.engine.money import Cents
 class PlayerState:
     id: int
     name: str
-    stack: float
+    stack: float  # Keep for backward compatibility
     position: str
     hole_cards: list[str] | None
     has_folded: bool
     is_all_in: bool
-    current_bet: float
-    round_contrib: float
-    hand_contrib: float
+    current_bet: float  # Keep for backward compatibility
+    round_contrib: float  # Keep for backward compatibility
+    hand_contrib: float  # Keep for backward compatibility
     
-    # New cents fields (parallel to existing float fields)
+    # MONEY: cents only - new fields for internal logic
     stack_cents: Cents = 0
     committed_cents: Cents = 0  # this hand
     current_bet_cents: Cents = 0  # this street
@@ -26,15 +26,15 @@ class PlayerState:
 class GameState:
     hand_id: int
     phase: str
-    pot: float
+    pot: float  # Keep for backward compatibility
     community_cards: list[str]
     players: list[PlayerState]
     action_on: int # player id of the next player to act
     last_action: dict | None = None
-    min_raise: float = 0.0
-    max_raise: float = 0.0
-    small_blind: float = 0.0
-    big_blind: float = 0.0
+    min_raise: float = 0.0  # Keep for backward compatibility
+    max_raise: float = 0.0  # Keep for backward compatibility
+    small_blind: float = 0.0  # Keep for backward compatibility
+    big_blind: float = 0.0  # Keep for backward compatibility
     dealer_position: str = ''
     
     # Phase controller fields
@@ -43,15 +43,15 @@ class GameState:
     step_number: int = 1
     
     # Street-scoped variables (reset each betting round)
-    highest_bet: float = 0.0
-    last_raise_increment: float = 0.0
+    highest_bet: float = 0.0  # Keep for backward compatibility
+    last_raise_increment: float = 0.0  # Keep for backward compatibility
     last_aggressor_seat: int | None = None
     acted_this_round: dict[int, bool] = None
-    committed_this_round: dict[int, float] = None
+    committed_this_round: dict[int, float] = None  # Keep for backward compatibility
     actionable_seats: deque = None
     awarded_uncontested: bool = False
     
-    # New cents fields (parallel to existing float fields)
+    # MONEY: cents only - new fields for internal logic
     pot_cents: Cents = 0
     bet_to_call_cents: Cents = 0
     
@@ -63,7 +63,7 @@ class GameState:
         if self.actionable_seats is None:
             self.actionable_seats = deque()
     
-    def reset_street_vars(self, bb: float, is_preflop: bool) -> None:
+    def reset_street_vars(self, bb: float, is_preflop: bool) -> None:  # Keep bb as float for API compatibility
         """Reset street-scoped variables for a new betting round."""
         self.highest_bet = bb if is_preflop else 0.0
         self.last_raise_increment = bb

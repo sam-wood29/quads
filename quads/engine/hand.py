@@ -11,10 +11,10 @@ from quads.engine.enums import ActionType, Phase, RaiseSetting
 from quads.engine.game_state import GameState, PlayerState
 from quads.engine.hand_parser import parse_hole_cards
 from quads.engine.logger import get_logger
+from quads.engine.money import Cents, from_cents, to_cents
 from quads.engine.player import Player, Position
-from quads.engine.validated_action import ValidatedAction
-from quads.engine.money import to_cents
 from quads.engine.pot_manager import PotManager
+from quads.engine.validated_action import ValidatedAction
 
 from .phase_controller import PhaseController
 
@@ -51,7 +51,7 @@ class Hand:
         # Initialize players in button order (will be updated in play() if needed)
         self.players_in_button_order = self._assign_positions()
         
-        # Convert blinds to integers (cents) to avoid float precision issues
+        # MONEY: Convert blinds to cents at hand start
         self.small_blind_cents = to_cents(small_blind)
         self.big_blind_cents = to_cents(big_blind)
         
@@ -177,7 +177,7 @@ class Hand:
         
     def _reset_players(self):
         for p in self.players:
-            # Convert all player stacks to cents at hand start
+            # MONEY: Convert all player stacks to cents at hand start
             p.stack = int(round(p.stack * 100)) if isinstance(p.stack, float) else p.stack
             # Reset all betting amounts to 0 (in cents)
             p.current_bet = 0
@@ -231,6 +231,7 @@ class Hand:
         return players_in_order
     
     def _post_blinds(self):
+        # MONEY: All blind calculations use cents
         sb_amount = self.small_blind_cents
         bb_amount = self.big_blind_cents
         ordered_player_list = self.players_in_button_order
@@ -264,7 +265,7 @@ class Hand:
         
         self.pot += (bb_paid + sb_paid) / 100  # Keep float pot for backward compatibility
         
-        # Log actions (convert back to dollars for logging)
+        # Log actions using cents
         conn = self.conn
         game_session_id = self.game_session_id
         hand_id = self.id
@@ -273,20 +274,20 @@ class Hand:
         # Log SB
         player = sb_player
         action = ActionType.POST_SMALL_BLIND.value
-        amount = sb_paid / 100  # Convert cents to dollars for logging
+        amount_cents = sb_paid  # Use cents directly
         phase = Phase.DEAL.value
         position = sb_player.position
         sb_logged = log_action(conn=conn, game_session_id=game_session_id, hand_id=hand_id, step_number=step_number,
-               player=player, action=action, amount=amount, phase=phase, position=position)
+               player=player, action=action, amount_cents=amount_cents, phase=phase, position=position)
         self.step_number += 1
         
         # Log BB
         player = bb_player
         action = ActionType.POST_BIG_BLIND.value
-        amount = bb_paid / 100  # Convert cents to dollars for logging
+        amount_cents = bb_paid  # Use cents directly
         position = bb_player.position
         bb_logged = log_action(conn=conn, game_session_id=game_session_id, hand_id=hand_id, step_number=step_number,
-               player=player, action=action, amount=amount, phase=phase, position=position)
+               player=player, action=action, amount_cents=amount_cents, phase=phase, position=position)
         
         if not bb_logged or not sb_logged:
             raise RuntimeError("Error entering blinds posted into db.")
@@ -850,6 +851,7 @@ class Hand:
 
     def apply_bet(self, player: Player, validated: ValidatedAction) -> None:
         """Apply a bet (first bet of the street)."""
+        # MONEY: All betting calculations use cents
         if self.highest_bet != 0:
             raise ValueError("apply_bet called when there's already a bet")
         
@@ -879,9 +881,24 @@ class Hand:
         self.last_aggressor = player.position
         self.acted_since_last_full_raise.clear()  # Reopen action
         self.acted_since_last_full_raise.add(player.position)  # Mark betting player as acted
+        
+        # Log the bet action using cents
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=player,
+            action=ActionType.BET.value,
+            amount_cents=bet_amount,
+            phase=self.phase.value,
+            position=player.position
+        )
+        self.step_number += 1
 
     def apply_raise(self, player: Player, validated: ValidatedAction) -> None:
         """Apply a raise."""
+        # MONEY: All raise calculations use cents
         if validated.action_type != ActionType.RAISE:
             raise ValueError("apply_raise called with non-raise action")
         
@@ -927,9 +944,24 @@ class Hand:
         
         # Mark player as acted
         self.acted_since_last_full_raise.add(player.position)
+        
+        # Log the raise action using cents
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=player,
+            action=ActionType.RAISE.value,
+            amount_cents=raise_to,
+            phase=self.phase.value,
+            position=player.position
+        )
+        self.step_number += 1
 
     def apply_call(self, player: Player, validated: ValidatedAction) -> None:
         """Apply a call."""
+        # MONEY: All call calculations use cents
         call_amount = validated.amount
         
         # Update player state
@@ -950,6 +982,20 @@ class Hand:
         
         # Mark player as acted
         self.acted_since_last_full_raise.add(player.position)
+        
+        # Log the call action using cents
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=player,
+            action=ActionType.CALL.value,
+            amount_cents=call_amount,
+            phase=self.phase.value,
+            position=player.position
+        )
+        self.step_number += 1
 
     def apply_check(self, player: Player, validated: ValidatedAction) -> None:
         """Apply a check."""
@@ -970,6 +1016,7 @@ class Hand:
 
     def _return_uncalled_bet(self, aggressor: Player) -> None:
         """Return uncalled portion of a bet to the aggressor."""
+        # MONEY: All uncalled bet calculations use cents
         if not aggressor:
             return
         
@@ -997,6 +1044,21 @@ class Hand:
         self.pot -= uncalled_amount / 100
         
         self.logger.info(f"Returned {uncalled_amount} cents uncalled bet to {aggressor.id}")
+        
+        # Log the uncalled bet return using cents
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=aggressor,
+            action="return_uncalled_bet",
+            amount_cents=uncalled_amount,
+            phase=self.phase.value,
+            position=aggressor.position,
+            detail="Returned uncalled portion of bet"
+        )
+        self.step_number += 1
 
     def validate_action(self, player: Player, action: ActionType, amount: int = 0) -> ValidatedAction:
         """Validate an action before applying it."""
@@ -1077,7 +1139,8 @@ def log_action(
     step_number: int,
     player: Player = None,  # Changed from player_id
     action: str = None,
-    amount: float = None,
+    amount: float = None,  # Keep for backward compatibility
+    amount_cents: Cents = None,  # MONEY: New parameter for cents
     phase: str = None,
     hole_cards: str = None,
     community_cards: str = None,
@@ -1104,6 +1167,10 @@ def log_action(
         
         # Handle player_id (can be None for phase advances)
         player_id = player.id if player else None
+        
+        # Convert cents to float for DB if provided
+        if amount_cents is not None:
+            amount = from_cents(amount_cents)
         
         cur.execute("""
             INSERT INTO actions (

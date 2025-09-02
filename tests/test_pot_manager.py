@@ -8,9 +8,8 @@ This module handles all pot-related operations including:
 """
 
 from dataclasses import dataclass
-from typing import Dict, Set, List
 
-from quads.engine.money import Cents, add_cents, nonneg
+from quads.engine.money import Cents, nonneg
 
 PlayerId = int
 
@@ -19,7 +18,7 @@ PlayerId = int
 class Pot:
     """Represents a pot with amount and eligible players."""
     amount_cents: Cents
-    eligible: Set[PlayerId]  # players who can win from this pot
+    eligible: set[PlayerId]  # players who can win from this pot
 
 
 class PotManager:
@@ -30,15 +29,15 @@ class PotManager:
     Keeps betting logic simpler by centralizing pot operations.
     """
     
-    def __init__(self, players: Set[PlayerId]):
+    def __init__(self, players: set[PlayerId]):
         """
         Initialize pot manager with set of player IDs.
         
         Args:
             players: Set of player IDs participating in the hand
         """
-        self.contributed: Dict[PlayerId, Cents] = {pid: 0 for pid in players}
-        self.folded: Set[PlayerId] = set()
+        self.contributed: dict[PlayerId, Cents] = {pid: 0 for pid in players}
+        self.folded: set[PlayerId] = set()
     
     def post(self, pid: PlayerId, cents: Cents) -> None:
         """
@@ -65,7 +64,7 @@ class PotManager:
         
         self.folded.add(pid)
     
-    def build_pots(self) -> List[Pot]:
+    def build_pots(self) -> list[Pot]:
         """
         Build side pots by contribution tiers.
         
@@ -84,7 +83,7 @@ class PotManager:
         if not levels:
             return []
         
-        pots: List[Pot] = []
+        pots: list[Pot] = []
         prev = 0
         
         for L in levels:
@@ -145,7 +144,7 @@ class PotManager:
 import pytest
 
 from quads.engine.money import Cents
-from quads.engine.pot_manager import PotManager, Pot
+from quads.engine.pot_manager import Pot, PotManager
 
 
 class TestPotManager:
