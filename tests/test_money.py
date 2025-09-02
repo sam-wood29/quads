@@ -38,7 +38,7 @@ def to_cents(amount: float | str | int) -> cents:
             float_val = float(amount)
         except ValueError as e:
             raise ValueError(f"Invalid amount format: {amount}") from e
-    elif isinstance(amount, (int, float)):
+    elif isinstance(amount, int | float):
         float_val = float(amount)
     else:
         raise ValueError(f"Unsupported type: {type(amount)}")

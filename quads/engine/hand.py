@@ -908,7 +908,6 @@ class Hand:
         # Handle all-in scenario
         if additional_bet > player.stack:
             # Cap the raise to what the player can afford
-            actual_raise_to = player.current_bet + player.stack
             additional_bet = player.stack
             player.all_in = True
         
