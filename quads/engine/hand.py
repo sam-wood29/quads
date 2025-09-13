@@ -399,18 +399,25 @@ class Hand:
         if self.script is None:
             raise RuntimeError("No script provided")
         
+        # DEBUG: Print what we're looking for
+        print(f"DEBUG: Looking for actions for player {ap.seat_index} ({ap.position}) in phase {self.phase.value}")
+        
         # Get current phase
         current_phase = self.phase.value
         
         # Get actions for this phase
         phase_actions = self.script.get(current_phase, {}).get("actions", {})
+        print(f"DEBUG: Phase actions available: {phase_actions}")
+        
         player_actions = phase_actions.get(ap.seat_index, [])
+        print(f"DEBUG: Player {ap.seat_index} actions: {player_actions}")
         
         if not player_actions:
             raise RuntimeError(f"No actions for player {ap.seat_index} in phase {current_phase}")
         
         # Get the first action and remove it from the list
         action = player_actions.pop(0)
+        print(f"DEBUG: Selected action for player {ap.seat_index}: {action}")
         
         # Convert action to ValidatedAction
         action_type = ActionType(action["type"])
@@ -420,14 +427,10 @@ class Hand:
         if isinstance(amount, float):
             amount = to_cents(amount)
         
+        print(f"DEBUG: Converted to action_type={action_type}, amount={amount}")
+        
         # Validate the action
-        return ValidatedAction(
-            action_type=action_type,
-            amount=amount,
-            is_full_raise=False,
-            raise_increment=0,
-            reopen_action=False
-        )
+        return self.validate_action(ap, action_type, amount)
     
     def _get_player_action(self, acting_player: Player, game_state: GameState):
         """Get player action from script or manual input."""
