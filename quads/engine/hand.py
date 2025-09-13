@@ -136,7 +136,9 @@ class Hand:
         # Script processing is now handled by structured format
         
         self.players = self._reset_players()
-        self.dealer_index = self._advance_dealer()
+        # Only advance dealer for non-scripted hands
+        if self.script is None:
+            self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
         self._post_blinds()
         self._deal_hole_cards()
@@ -399,25 +401,18 @@ class Hand:
         if self.script is None:
             raise RuntimeError("No script provided")
         
-        # DEBUG: Print what we're looking for
-        print(f"DEBUG: Looking for actions for player {ap.seat_index} ({ap.position}) in phase {self.phase.value}")
-        
-        # Get current phase
+        # Simplified debug output
         current_phase = self.phase.value
-        
-        # Get actions for this phase
         phase_actions = self.script.get(current_phase, {}).get("actions", {})
-        print(f"DEBUG: Phase actions available: {phase_actions}")
-        
         player_actions = phase_actions.get(ap.seat_index, [])
-        print(f"DEBUG: Player {ap.seat_index} actions: {player_actions}")
+        
+        print(f"DEBUG: P{ap.seat_index} ({ap.position}) in {current_phase}: {player_actions}")
         
         if not player_actions:
             raise RuntimeError(f"No actions for player {ap.seat_index} in phase {current_phase}")
         
         # Get the first action and remove it from the list
         action = player_actions.pop(0)
-        print(f"DEBUG: Selected action for player {ap.seat_index}: {action}")
         
         # Convert action to ValidatedAction
         action_type = ActionType(action["type"])
@@ -426,8 +421,6 @@ class Hand:
         # Convert amount to cents if it's a float
         if isinstance(amount, float):
             amount = to_cents(amount)
-        
-        print(f"DEBUG: Converted to action_type={action_type}, amount={amount}")
         
         # Validate the action
         return self.validate_action(ap, action_type, amount)

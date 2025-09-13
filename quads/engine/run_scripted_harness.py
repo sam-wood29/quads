@@ -82,7 +82,8 @@ def run_script(script: dict[str, Any]):
     start_stacks = script["start_stacks"]
     players = []
     for i in range(len(start_stacks)):
-        stack_cents = to_cents(start_stacks[i])
+        # Line 85: Remove to_cents conversion since script already has cents
+        stack_cents = start_stacks[i]  # Direct assignment
         controller = Controller(controller_type=ControllerType.SCRIPT)
         player = Player(id=i, name=f"P{i}", controller=controller, stack=stack_cents, seat_index=i)
         players.append(player)
@@ -117,8 +118,8 @@ def run_script(script: dict[str, Any]):
         game_session_id=1, 
         conn=conn,
         script=script,  # Hand processes this
-        small_blind=script["small_blind"],
-        big_blind=script["big_blind"]
+        small_blind=from_cents(script["small_blind"]),
+        big_blind=from_cents(script["big_blind"])
     )
 
     # 5) Play the hand - Hand does everything
