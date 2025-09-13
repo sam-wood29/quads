@@ -23,7 +23,7 @@ class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
                   conn: sqlite3.Connection, script: dict | None = None, 
                   raise_settings: RaiseSetting = RaiseSetting.STANDARD, small_blind: float = 0.25, 
-                  big_blind: float = 0.50, script_index: int | None = None):
+                  big_blind: float = 0.50):
         self.players = players
         self.id = id
         self.deck = deck
@@ -34,7 +34,7 @@ class Hand:
         self.raise_settings = raise_settings
         self.small_blind = small_blind
         self.big_blind = big_blind
-        self.script_index = script_index if script_index is not None else 0  # Initialize to 0 if None
+        # Remove script_index - no longer needed
         self.community_cards: list[int] = []
         self.pot = 0.0
         self.step_number = 1
@@ -133,9 +133,7 @@ class Hand:
         # Use phase controller for all phase transitions
         self.phase_controller.enter_phase(Phase.DEAL)
         
-        # Initialize script_index if script exists
-        if self.script and self.script_index is None:
-            self.script_index = 0
+        # Script processing is now handled by structured format
         
         self.players = self._reset_players()
         self.dealer_index = self._advance_dealer()
@@ -292,53 +290,52 @@ class Hand:
         if not bb_logged or not sb_logged:
             raise RuntimeError("Error entering blinds posted into db.")
         
-    def _get_next_script_action(self):
-        if self.script_index >= len(self.script):
-            raise RuntimeError("No more scripted actions")
-        action = self.script[self.script_index]
-        print(action) # helpline
-        self.script_index += 1
-        return action
+    # Add these new methods to handle structured script format
+    def _get_structured_script_action(self, player_id: int, phase: str):
+        """Get next action for a player from structured script format."""
+        if self.script is None:
+            raise RuntimeError("No script provided")
         
+        phase_actions = self.script.get(phase, {}).get("actions", {})
+        player_actions = phase_actions.get(str(player_id), [])
+        
+        if not player_actions:
+            raise RuntimeError(f"No actions for player {player_id} in phase {phase}")
+        
+        # Get the first action and remove it from the list
+        action = player_actions.pop(0)
+        return action
+
     def _deal_hole_cards(self):
-        players = self.players_in_button_order
-        print(f"DEBUG: players_in_button_order = {[p.id for p in players]}")
-        n = 1 % len(players)
-        print(f"DEBUG: n = {n}")
-        rotated_players = players[n:] + players[:n]
-        print(f"DEBUG: rotated_players = {[p.id for p in rotated_players]}")
-        for p in rotated_players:
-            if self.script is not None: # scripted game
-                script = self._get_next_script_action()
-                print(f"DEBUG: p.id={p.id}, script['player']={script['player']}, int(script['player'])={int(script['player'])}")
-                if p.id != int(script['player']):
-                    raise RuntimeError("Script / Game mismatch.")
-                card_strings = script['cards']
-                cards_for_db = ",".join(card_strings)
-                cards_for_player = Card.hand_to_binary(card_strings)
-            else:
-                card1 = self.deck.draw()
-                card2 = self.deck.draw()
-                cards_for_player = [card1, card2]
-                card_strings = [Card.int_to_str(card1), Card.int_to_str(card2)]
-                cards_for_db = ",".join(card_strings)
-            p.hole_cards = cards_for_player
-            features = parse_hole_cards(cards_for_db)
-            if (features.get("is_pair", ValueError("unfound key")) == 1):
-                hand_class = 8
-            else:
-                hand_class = 9
-            success = log_action(conn=self.conn, game_session_id=self.game_session_id, hand_id=self.id,
-                                 step_number=self.step_number, player=p, action=ActionType.DEAL_HOLE.value, position=p.position,
-                                 phase=Phase.DEAL.value, hole_cards=cards_for_db, hand_class=hand_class,
-                                 hole_card1=features.get("hole_card1"), hole_card2=features.get("hole_card2"), pf_hand_class=features.get("hand_class"),
-                                 high_rank=features.get("high_rank"), low_rank=features.get("low_rank"), is_pair=features.get("is_pair"),
-                                 is_suited=features.get("is_suited"), gap=features.get("gap"), chen_score=features.get("chen_score"))
-            self.step_number += 1
-            if not success:
-                raise RuntimeError("Unable to log action while dealing hole cards.")
-            
-    
+        """Deal hole cards using structured script format."""
+        if self.script is None:
+            raise RuntimeError("No script provided for hole card dealing")
+        
+        hole_cards = self.script.get("hole_cards", [])
+        if not hole_cards:
+            raise RuntimeError("No hole cards in script")
+        
+        # Deal cards to each player in button order
+        for i, player in enumerate(self.players_in_button_order):
+            if i < len(hole_cards):
+                cards = hole_cards[i]
+                if len(cards) != 2:
+                    raise RuntimeError(f"Expected 2 hole cards, got {len(cards)}")
+                
+                # Convert card strings to Deuces ints
+                card_ints = Card.hand_to_binary(cards)
+                player.hole_cards = card_ints
+                
+                # Log the deal
+                log_action(
+                    self.conn, self.game_session_id, self.id, 
+                    self.game_state.next_step_number(),
+                    player=player,
+                    action=ActionType.DEAL_HOLE.value,
+                    phase=self.phase.value,
+                    hole_cards=",".join(cards)
+                )
+
     def _rebuild_players_yet_to_act_after_raise(self, action_order: list[Player], raiser: Player) -> list[Player]:
         highest_bet = self.highest_bet
         remaining = [
@@ -398,50 +395,48 @@ class Hand:
             
         
     def _select_validate_action(self, ap: Player, valid_actions: dict):
-        if self.script is not None:
-            action = self._get_next_script_action()
-            if action["type"] == "action":
-                if not ap.id == action["player"]:
-                    raise ValueError ("Script mismatch.")
-                r_action = action["move"]
-                
-                # Convert script amounts to cents immediately for all actions
-                if "amount" in action:
-                    r_amount_cents = int(round(float(action["amount"]) * 100))
-                else:
-                    r_amount_cents = 0
-            if action["type"] == 'test':
-                raise RuntimeError("test scipt 'Actions' not yet implemented.")
-        else:
-            raise RuntimeError("Unscripted play not implemented yet.")
+        """Select and validate action from structured script format."""
+        if self.script is None:
+            raise RuntimeError("No script provided")
         
-        match r_action:
-            case "check":
-                r_action = ActionType.CHECK
-            case "fold":
-                r_action = ActionType.FOLD
-            case "call":
-                r_action = ActionType.CALL
-            case "raise":
-                r_action = ActionType.RAISE
-                if r_amount_cents not in valid_actions["raise_amounts"]:
-                    if self.script is not None:
-                        raise ValueError("Invalid raise amount in script.")
-                    else:
-                        raise RuntimeError("Unscripted play not supported yet.")
-        if r_action not in valid_actions["actions"]:
-            if self.script is not None:
-                raise ValueError("Invalid action in script")
-            else:
-                raise ValueError("Unscripted play not supported yet.")
-        return r_action, r_amount_cents
+        # Get current phase
+        current_phase = self.phase.value
+        
+        # Get actions for this phase
+        phase_actions = self.script.get(current_phase, {}).get("actions", {})
+        player_actions = phase_actions.get(ap.seat_index, [])
+        
+        if not player_actions:
+            raise RuntimeError(f"No actions for player {ap.seat_index} in phase {current_phase}")
+        
+        # Get the first action and remove it from the list
+        action = player_actions.pop(0)
+        
+        # Convert action to ValidatedAction
+        action_type = ActionType(action["type"])
+        amount = action.get("amount", 0)
+        
+        # Convert amount to cents if it's a float
+        if isinstance(amount, float):
+            amount = to_cents(amount)
+        
+        # Validate the action
+        return ValidatedAction(
+            action_type=action_type,
+            amount=amount,
+            is_full_raise=False,
+            raise_increment=0,
+            reopen_action=False
+        )
     
     def _get_player_action(self, acting_player: Player, game_state: GameState):
         """Get player action from script or manual input."""
         ap = acting_player
         amount_to_call = self.highest_bet - ap.current_bet
         valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
-        selected_action, selected_amount = self._select_validate_action(ap=ap, valid_actions=valid_actions)
+        validated_action = self._select_validate_action(ap=ap, valid_actions=valid_actions)
+        selected_action = validated_action.action_type
+        selected_amount = validated_action.amount
         return selected_action, selected_amount, amount_to_call
     
     def handle_player_action(self, game_state: GameState, selected_action: ActionType, selected_amount: int,
@@ -527,10 +522,18 @@ class Hand:
         script = self.script if self.script else None
         if script is not None:
             print("scripted game")
-            action = self._get_next_script_action()
-            if action["type"] != "deal_community":
-                raise ValueError("Something is wrong.")
-            card_strings = action["cards"]
+            # Get community cards from structured script format
+            board = script["board"]
+            
+            if self.phase == Phase.FLOP:
+                card_strings = board[:3]  # First 3 cards for flop
+            elif self.phase == Phase.TURN:
+                card_strings = [board[3]]  # 4th card for turn
+            elif self.phase == Phase.RIVER:
+                card_strings = [board[4]]  # 5th card for river
+            else:
+                raise ValueError(f"Unexpected phase for community deal: {self.phase}")
+            
             # convert to deuces ints
             cards = [Card.new(card_str) for card_str in card_strings]
         else:
@@ -538,22 +541,41 @@ class Hand:
             raise ValueError("Unscripted play not implemented yet. :(")
         
         return cards
-    
+
     def _apply_community_deal(self, phase: Phase) -> None:
-        """Apply community card deal to the authoritative list"""
-        new_cards = self._deal_community_cards()
+        """Deal community cards for the given phase using structured script format."""
+        if self.script is None:
+            raise RuntimeError("No script provided for community card dealing")
+        
+        board = self.script.get("board", [])
+        if not board:
+            raise RuntimeError("No board cards in script")
+        
+        # Determine which cards to deal based on phase
         if phase == Phase.FLOP:
-            # Flop should be exactly 3 cards
-            if len(new_cards) != 3:
-                raise ValueError(f"Flop must be 3 cards, got {len(new_cards)}")
-            self.community_cards = new_cards
-        elif phase in (Phase.TURN, Phase.RIVER):
-            # Turn adds 1 card
-            if len(new_cards) != 1:
-                raise ValueError(f"Turn must be 1 card, got {len(new_cards)}")
-            self.community_cards.append(new_cards[0])
+            cards_to_deal = board[:3]
+        elif phase == Phase.TURN:
+            cards_to_deal = board[3:4]
+        elif phase == Phase.RIVER:
+            cards_to_deal = board[4:5]
         else:
-            raise ValueError(f"Invalid phase for community deal: {phase}")
+            raise RuntimeError(f"Unexpected phase for community deal: {phase}")
+        
+        if not cards_to_deal:
+            raise RuntimeError(f"No cards available for {phase}")
+        
+        # Convert card strings to Deuces ints and add to community cards
+        card_ints = Card.hand_to_binary(cards_to_deal)
+        self.community_cards.extend(card_ints)
+        
+        # Log the deal
+        log_action(
+            self.conn, self.game_session_id, self.id,
+            self.game_state.next_step_number(),
+            action=ActionType.DEAL_COMMUNITY.value,
+            phase=phase.value,
+            community_cards=",".join(cards_to_deal)
+        )
 
     
     def _get_last_player_action_data(self, player: Player) -> dict:
@@ -599,6 +621,9 @@ class Hand:
         """Run a complete betting round using the new reopen logic."""
         # Use phase controller to start betting round
         self.phase_controller.start_betting_round()
+        
+        # Initialize Hand's betting state for this round
+        self._reset_betting_round_state()
         
         # Get the theoretical betting order for this phase
         num_players = len(self.players)

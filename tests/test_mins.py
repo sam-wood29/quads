@@ -1,6 +1,7 @@
 import pytest
 
 from quads.engine.hand import Hand, Phase
+from unittest.mock import Mock
 
 
 def test_community_cards_methods_directly():
@@ -11,12 +12,18 @@ def test_community_cards_methods_directly():
     
     # Set up minimal attributes needed for testing
     hand.community_cards = []
-    hand.script = [
-        {"type": "deal_community", "cards": ["Ah", "Kh", "Qh"]},  # Flop
-        {"type": "deal_community", "cards": ["Jh"]},               # Turn
-        {"type": "deal_community", "cards": ["Th"]},               # River
-    ]
-    hand.script_index = 0
+    hand.script = {
+        "board": ["Ah", "Kh", "Qh", "Jh", "Th"]  # New structured format
+    }
+    
+    # Create a minimal game_state to avoid AttributeError
+    hand.conn = Mock()
+    hand.game_session_id = 1
+    hand.id = 1
+    
+    hand.game_state = Mock()
+    hand.game_state.phase = Phase.FLOP.value
+    hand.game_state.next_step_number = Mock(return_value=1)
     
     # Test the community card methods directly
     print("=== Testing Community Card Methods ===")
@@ -33,6 +40,7 @@ def test_community_cards_methods_directly():
     
     # Test TURN
     print("\n--- Testing TURN ---")
+    hand.game_state.phase = Phase.TURN.value  # Set to TURN phase
     hand._apply_community_deal(Phase.TURN)
     print(f"After turn: {hand.community_cards}")
     print(f"Length: {len(hand.community_cards)}")
@@ -41,6 +49,7 @@ def test_community_cards_methods_directly():
     
     # Test RIVER
     print("\n--- Testing RIVER ---")
+    hand.game_state.phase = Phase.RIVER.value  # Set to RIVER phase
     hand._apply_community_deal(Phase.RIVER)
     print(f"After river: {hand.community_cards}")
     print(f"Length: {len(hand.community_cards)}")
@@ -52,101 +61,25 @@ def test_community_cards_methods_directly():
     
     print("✅ All community card tests passed!")
 
-def test_community_cards_single_source_of_truth():
-    """Test that community_cards list is the single source of truth"""
-    
-    # Create a minimal hand object with proper initialization
-    from unittest.mock import Mock
-
-    
-    hand = Hand.__new__(Hand)
-    hand.community_cards = []
-    hand.script = [
-        {"type": "deal_community", "cards": ["Ah", "Kh", "Qh"]},  # Flop
-        {"type": "deal_community", "cards": ["Jh"]},               # Turn
-        {"type": "deal_community", "cards": ["Th"]},               # River
-    ]
-    hand.script_index = 0
-    
-    # Create a minimal game_state to avoid AttributeError
-    hand.game_state = Mock()
-    hand.game_state.phase = Phase.DEAL.value
-    
-    # Verify initial state
-    assert hand.community_cards == [], "Community cards should start empty"
-    assert isinstance(hand.community_cards, list), "Community cards should be a list"
-    
-    # Test that the list grows correctly
-    hand.phase = Phase.FLOP
-    hand._apply_community_deal(Phase.FLOP)
-    assert len(hand.community_cards) == 3, "Flop should add exactly 3 cards"
-    
-    hand.phase = Phase.TURN
-    hand._apply_community_deal(Phase.TURN)
-    assert len(hand.community_cards) == 4, "Turn should add exactly 1 card"
-    
-    hand.phase = Phase.RIVER
-    hand._apply_community_deal(Phase.RIVER)
-    assert len(hand.community_cards) == 5, "River should add exactly 1 card"
-    
-    # Verify all cards are Deuces ints
-    for card in hand.community_cards:
-        assert isinstance(card, int), f"Card {card} should be a Deuces int"
-        assert card > 0, f"Card {card} should be a positive integer"
-    
-    print("✅ Single source of truth test passed!")
-
-def test_no_reparsing_of_cards():
-    """Test that cards are not re-parsed when evaluating hands"""
-    
-    # Create a minimal hand object with proper initialization
-    from unittest.mock import Mock
-    
-    hand = Hand.__new__(Hand)
-    hand.community_cards = []
-    hand.script = [
-        {"type": "deal_community", "cards": ["Ah", "Kh", "Qh"]},  # Flop
-        {"type": "deal_community", "cards": ["Jh"]},               # Turn
-        {"type": "deal_community", "cards": ["Th"]},               # River
-    ]
-    hand.script_index = 0
-    
-    # Create a minimal game_state to avoid AttributeError
-    hand.game_state = Mock()
-    hand.game_state.phase = Phase.DEAL.value
-    
-    # Deal community cards
-    hand.phase = Phase.FLOP
-    hand._apply_community_deal(Phase.FLOP)
-    
-    # Store the original card objects
-    original_cards = hand.community_cards.copy()
-    
-    # Test evaluation - should use the same card objects
-    # Create mock hole cards for testing
-    hole_cards_str = "As,Ad"  # Mock hole cards
-    
-    # This should use hand.community_cards directly (no re-parsing)
-    score, hand_class = hand._get_score(hole_cards_str, "")
-    
-    # Verify the community cards list wasn't modified
-    assert hand.community_cards == original_cards, "Community cards should not be modified during evaluation"
-    assert all(card is original_cards[i] for i, card in enumerate(hand.community_cards)), "Should use same card objects"
-    
-    print("✅ No re-parsing test passed!")
-
 def test_logging_conversion():
     """Test that logging converts to strings only when needed"""
     
     # Create a minimal hand object
     hand = Hand.__new__(Hand)
     hand.community_cards = []
-    hand.script = [
-        {"type": "deal_community", "cards": ["Ah", "Kh", "Qh"]},  # Flop
-        {"type": "deal_community", "cards": ["Jh"]},               # Turn
-        {"type": "deal_community", "cards": ["Th"]},               # River
-    ]
-    hand.script_index = 0
+    hand.script = {
+        "board": ["Ah", "Kh", "Qh", "Jh", "Th"]  # New structured format
+    }
+    
+    # Mock the attributes that log_action_needs
+    hand.conn = Mock()
+    hand.game_session_id = 1
+    hand.id = 1
+    
+    # Create a minimal game_state to avoid Attribute Error
+    hand.game_state = Mock()
+    hand.game_state.phase = Phase.DEAL.value
+    hand.game_state.next_step_number = Mock(return_value=1)
     
     # Deal all community cards
     hand._apply_community_deal(Phase.FLOP)

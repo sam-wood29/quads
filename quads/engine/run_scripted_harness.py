@@ -7,9 +7,11 @@ from quads.engine.scripted_agent import ScriptedAgent
 from quads.engine.deck_sequence import get_rotated_indices, build_sequence_using_rotation
 from quads.engine.script_loader import get_script_actions_by_seat
 from quads.engine.va_factory import make_va_factory
-from quads.engine.money import to_cents
+from quads.engine.money import to_cents, from_cents
 from quads.deuces.deck import Deck
 from quads.engine.controller import Controller, ControllerType
+from quads.engine.hand import Phase, Position, BettingOrder, ActionType
+from quads.engine.hand import log_action
 
 
 def create_schema(conn: sqlite3.Connection):
@@ -68,15 +70,7 @@ def create_schema(conn: sqlite3.Connection):
 
 
 def run_script(script: dict[str, Any]):
-    """
-    Run a scripted hand end-to-end.
-    
-    Args:
-        script: Normalized script dict
-        
-    Returns:
-        Dict with final_stacks, total_pot, and actions_rows
-    """
+    """Run a complete scripted poker hand."""
     # Set seed for deterministic behavior
     Deck.set_seed(42)
 
@@ -88,23 +82,16 @@ def run_script(script: dict[str, Any]):
     start_stacks = script["start_stacks"]
     players = []
     for i in range(len(start_stacks)):
-        # Convert stack to cents
         stack_cents = to_cents(start_stacks[i])
-        # Create a script controller for each player
         controller = Controller(controller_type=ControllerType.SCRIPT)
-        player = Player(
-            id=i, 
-            name=f"P{i}", 
-            controller=controller,  # Fixed: provide proper controller
-            stack=stack_cents,
-            seat_index=i
-        )
+        player = Player(id=i, name=f"P{i}", controller=controller, stack=stack_cents, seat_index=i)
         players.append(player)
     
+    # 3) Build deck sequence from script
     dealer_index = script["dealer_index"]
-
-    # 3) Create a "probe" Hand to compute rotated order before building deck sequence
-    probe_deck = ScriptedDeck(["As", "Ad"] * 20)  # harmless filler
+    
+    # Create a probe hand to get rotation
+    probe_deck = ScriptedDeck(["As", "Ad"] * 20)
     probe_hand = Hand(
         players=players, 
         id=1, 
@@ -116,109 +103,40 @@ def run_script(script: dict[str, Any]):
         big_blind=script["big_blind"]
     )
     rotated = get_rotated_indices(probe_hand)
-
-    # 4) Build the real deck sequence to match rotated order
+    
+    # Build the real deck sequence
     seq = build_sequence_using_rotation(script["hole_cards"], script["board"], rotated)
     deck = ScriptedDeck(seq)
 
-    # 5) Re-create Hand with the real deck
+    # 4) Create Hand with script - Hand handles everything
     hand = Hand(
         players=players, 
         id=1, 
-        deck=deck, 
+        deck=deck,
         dealer_index=dealer_index,
         game_session_id=1, 
         conn=conn,
+        script=script,  # Hand processes this
         small_blind=script["small_blind"],
         big_blind=script["big_blind"]
     )
 
-    # 6) Assemble per-seat action streams using normalized keys
-    actions_by_seat = get_script_actions_by_seat(script)
+    # 5) Play the hand - Hand does everything
+    hand.play()
 
-    # 7) Create agents with validation factory
-    va_factory = make_va_factory(hand)
-    agents = []
-    for seat_idx in range(len(players)):
-        actions = actions_by_seat.get(seat_idx, [])
-        agent = ScriptedAgent(actions, va_factory)
-        agents.append(agent)
-
-    # 8) Play the hand using existing logic but with agent decisions
-    result = play_hand_with_agents(hand, agents, script)
-
-    # 9) Extract ordered action rows & outputs
+    # 6) Return results
     cur = conn.cursor()
     cur.execute("""
         SELECT step_number, player_id, action, phase, detail, amount_to_call, highest_bet, position
         FROM actions
         WHERE hand_id=? ORDER BY step_number
     """, (hand.id,))
-    ordered_rows = cur.fetchall()
-
-    # Convert final stacks back to dollars for output
-    final_stacks = [p.stack / 100.0 for p in hand.players]  # Convert cents back to dollars
-    total_pot = hand.pot
-
+    actions_rows = cur.fetchall()
+    
     return {
-        "final_stacks": final_stacks, 
-        "total_pot": total_pot, 
-        "actions_rows": ordered_rows
+        "final_stacks": [from_cents(p.stack) for p in hand.players],
+        "total_pot": from_cents(hand.pot_manager.total_table_cents()),
+        "actions_rows": actions_rows,
+        "hand_id": hand.id,
+        "game_session_id": hand.game_session_id
     }
-
-
-def play_hand_with_agents(hand: Hand, agents: List[ScriptedAgent], script: dict):
-    """
-    Play a hand using scripted agents for decisions.
-    
-    Args:
-        hand: Hand instance
-        agents: List of ScriptedAgent instances, one per seat
-        script: Script dict for community card dealing
-        
-    Returns:
-        Result dict
-    """
-    # Override the _get_player_action method to use agents
-    original_get_player_action = hand._get_player_action
-    
-    def agent_get_player_action(acting_player: Player, game_state):
-        """Get action from agent instead of script."""
-        seat_idx = acting_player.id
-        if seat_idx >= len(agents):
-            raise RuntimeError(f"No agent for seat {seat_idx}")
-        
-        agent = agents[seat_idx]
-        validated_action = agent.decide(acting_player, game_state)
-        
-        # Calculate amount_to_call properly
-        amount_to_call = hand.highest_bet - acting_player.current_bet
-        
-        # Convert ValidatedAction back to the format expected by existing code
-        return validated_action.action_type, validated_action.amount, amount_to_call
-    
-    # Override community card dealing to use our script
-    original_deal_community_cards = hand._deal_community_cards
-    
-    def scripted_deal_community_cards():
-        """Deal community cards from our script."""
-        # Extract community cards from script based on current phase
-        if hand.phase.value == "flop":
-            return [hand.deck.draw() for _ in range(3)]  # Draw 3 cards for flop
-        elif hand.phase.value in ["turn", "river"]:
-            return [hand.deck.draw()]  # Draw 1 card for turn/river
-        else:
-            raise ValueError(f"Unexpected phase for community deal: {hand.phase}")
-    
-    # Replace the methods temporarily
-    hand._get_player_action = agent_get_player_action
-    hand._deal_community_cards = scripted_deal_community_cards
-    
-    try:
-        # Play the hand using existing logic
-        result = hand.play()
-        return {"success": True, "result": result}
-    finally:
-        # Restore original methods
-        hand._get_player_action = original_get_player_action
-        hand._deal_community_cards = original_deal_community_cards
