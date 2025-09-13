@@ -9,6 +9,7 @@ from quads.engine.script_loader import get_script_actions_by_seat
 from quads.engine.va_factory import make_va_factory
 from quads.engine.money import to_cents
 from quads.deuces.deck import Deck
+from quads.engine.controller import Controller, ControllerType
 
 
 def create_schema(conn: sqlite3.Connection):
@@ -89,10 +90,12 @@ def run_script(script: dict[str, Any]):
     for i in range(len(start_stacks)):
         # Convert stack to cents
         stack_cents = to_cents(start_stacks[i])
+        # Create a script controller for each player
+        controller = Controller(controller_type=ControllerType.SCRIPT)
         player = Player(
             id=i, 
             name=f"P{i}", 
-            controller=None,  # Will be handled by script
+            controller=controller,  # Fixed: provide proper controller
             stack=stack_cents,
             seat_index=i
         )
@@ -188,8 +191,11 @@ def play_hand_with_agents(hand: Hand, agents: List[ScriptedAgent], script: dict)
         agent = agents[seat_idx]
         validated_action = agent.decide(acting_player, game_state)
         
+        # Calculate amount_to_call properly
+        amount_to_call = hand.highest_bet - acting_player.current_bet
+        
         # Convert ValidatedAction back to the format expected by existing code
-        return validated_action.action_type, validated_action.amount, 0  # amount_to_call not used
+        return validated_action.action_type, validated_action.amount, amount_to_call
     
     # Override community card dealing to use our script
     original_deal_community_cards = hand._deal_community_cards

@@ -1,0 +1,52 @@
+{
+  "name": "hu_min_raise_line",
+  "small_blind": 0.25,
+  "big_blind": 0.50,
+  "start_stacks": [100.0, 100.0],
+  "dealer_index": 0,
+  "hole_cards": [
+    ["As", "Kd"],
+    ["7h", "7c"]
+  ],
+  "board": ["2d", "9s", "Jh", "5c", "3d"],
+  "preflop": {
+    "actions": {
+      "0": [
+        { "type": "raise", "amount": 1.0 }
+      ],
+      "1": [
+        { "type": "call" }
+      ]
+    }
+  },
+  "flop": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "check" }
+      ]
+    }
+  },
+  "turn": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "check" }
+      ]
+    }
+  },
+  "river": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "check" }
+      ]
+    }
+  }
+} 

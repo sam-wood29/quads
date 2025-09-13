@@ -1,0 +1,52 @@
+{
+  "name": "river_call",
+  "small_blind": 0.25,
+  "big_blind": 0.50,
+  "start_stacks": [100.0, 100.0],
+  "dealer_index": 1,
+  "hole_cards": [
+    ["Ad", "Js"],
+    ["Qh", "Jh"]
+  ],
+  "board": ["Jc", "4s", "6d", "2c", "Qd"],
+  "preflop": {
+    "actions": {
+      "0": [
+        { "type": "raise", "amount": 1.50 }
+      ],
+      "1": [
+        { "type": "call" }
+      ]
+    }
+  },
+  "flop": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "check" }
+      ]
+    }
+  },
+  "turn": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "bet", "amount": 2.00 }
+      ]
+    }
+  },
+  "river": {
+    "actions": {
+      "1": [
+        { "type": "check" }
+      ],
+      "0": [
+        { "type": "bet", "amount": 4.00 }
+      ]
+    }
+  }
+}

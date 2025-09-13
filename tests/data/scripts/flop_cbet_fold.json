@@ -1,0 +1,43 @@
+{
+  "name": "flop_cbet_fold",
+  "small_blind": 0.25,
+  "big_blind": 0.50,
+  "start_stacks": [100.0, 100.0, 100.0],
+  "dealer_index": 0,
+  "hole_cards": [
+    ["Kc", "Qs"],
+    ["9d", "9c"],
+    ["Ad", "7d"]
+  ],
+  "board": ["Jh", "2s", "3c", "8h", "4d"],
+  "preflop": {
+    "actions": {
+      "0": [
+        { "type": "raise", "amount": 1.50 }
+      ],
+      "1": [
+        { "type": "call" }
+      ],
+      "2": [
+        { "type": "fold" }
+      ]
+    }
+  },
+  "flop": {
+    "actions": {
+      "1": [
+        { "type": "check" },
+        { "type": "fold" }
+      ],
+      "0": [
+        { "type": "bet", "amount": 1.50 }
+      ]
+    }
+  },
+  "turn": {
+    "actions": {}
+  },
+  "river": {
+    "actions": {}
+  }
+}

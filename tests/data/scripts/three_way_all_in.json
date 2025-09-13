@@ -1,0 +1,35 @@
+{
+  "name": "three_way_all_in",
+  "small_blind": 0.25,
+  "big_blind": 0.50,
+  "start_stacks": [80.0, 40.0, 120.0],
+  "dealer_index": 0,
+  "hole_cards": [
+    ["Ah", "Kh"],
+    ["Qd", "Qc"],
+    ["As", "Ad"]
+  ],
+  "board": ["7s", "2c", "9h", "5d", "3d"],
+  "preflop": {
+    "actions": {
+      "0": [
+        { "type": "raise", "amount": 80.0 }
+      ],
+      "1": [
+        { "type": "call" }
+      ],
+      "2": [
+        { "type": "call" }
+      ]
+    }
+  },
+  "flop": {
+    "actions": {}
+  },
+  "turn": {
+    "actions": {}
+  },
+  "river": {
+    "actions": {}
+  }
+}
