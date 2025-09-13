@@ -118,8 +118,8 @@ def run_script(script: dict[str, Any]):
         game_session_id=1, 
         conn=conn,
         script=script,  # Hand processes this
-        small_blind=from_cents(script["small_blind"]),
-        big_blind=from_cents(script["big_blind"])
+        small_blind=script["small_blind"],
+        big_blind=script["big_blind"]
     )
 
     # 5) Play the hand - Hand does everything

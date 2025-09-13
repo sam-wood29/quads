@@ -143,10 +143,22 @@ class PhaseController:
     
     def _award_uncontested_pot(self) -> None:
         """Award pot to the remaining active player."""
+        print(f"DEBUG: _award_uncontested_pot called")
+        
         winner = next((p for p in self.state.players if not p.has_folded), None)
         if not winner:
             self.logger.error("No winner found for uncontested pot")
             return
+        
+        print(f"DEBUG: Winner found: player {winner.id}")
+        print(f"DEBUG: Winner stack before: {winner.stack}")
+        print(f"DEBUG: Pot amount: {self.state.pot}")
+        
+        # FIX: Use self.state.pot instead of pot_manager and convert to cents
+        pot_cents = int(self.state.pot * 100)  # Convert dollars to cents
+        winner.stack += pot_cents
+        
+        print(f"DEBUG: Winner stack after: {winner.stack}")
         
         self.state.awarded_uncontested = True
         
