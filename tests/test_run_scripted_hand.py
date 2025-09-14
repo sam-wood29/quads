@@ -70,8 +70,8 @@ def test_run_scripted_hand_simple():
         "board": ["2d", "9s", "Jh", "5c", "3d"],
         "preflop": {
             "actions": {
-                1: [{"type": "check"}],  # BB checks
-                0: [{"type": "check"}]   # SB checks
+                0: [{"type": "call"}],  # SB Calls 
+                1: [{"type": "check"}]   # BB checks
             }
         },
         "flop": {

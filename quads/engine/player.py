@@ -75,7 +75,7 @@ class Position(str, Enum):
         return self.name.replace("UTG1", "UTG+1").replace("UTG2", "UTG+2")
     
 POSITIONS_BY_PLAYER_COUNT = {
-    2: [Position.BUTTON, Position.BB],
+    2: [Position.SB, Position.BB],  # In heads-up, dealer is SB
     3: [Position.BUTTON, Position.SB, Position.BB],
     4: [Position.BUTTON, Position.SB, Position.BB, Position.UTG],
     5: [Position.BUTTON, Position.SB, Position.BB, Position.UTG, Position.CO],
