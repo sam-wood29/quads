@@ -189,10 +189,11 @@ def run_script(script: dict[str, Any]):
     # Calculate the actual pot amount that was awarded
     # If pot was awarded uncontested, use the game state pot (which includes uncalled bets)
     if hand.game_state.awarded_uncontested:
-        # Use the game state pot which shows the total pot before uncalled bet return
+        # For both uncontested and contested pots, the pot should be cleared after awarding
+        # So we need to calculate the original pot amount from the game state
         total_pot = hand.game_state.pot
     else:
-        # Use pot manager total for contested pots
+        # Pot wasn't awarded - this shouldn't happen in normal flow
         total_pot = from_cents(hand.pot_manager.total_table_cents())
     
     return {

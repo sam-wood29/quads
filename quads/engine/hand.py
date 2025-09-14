@@ -216,7 +216,7 @@ class Hand:
             self.phase_controller._award_uncontested_pot()
         else:
             self.phase_controller.enter_phase(Phase.SHOWDOWN)
-            # TODO: Implement showdown logic for contested pots
+            self.phase_controller._award_contested_pot()
         
         return self.players, self.id, self.deck, False, self.script, self.dealer_index
         
@@ -553,6 +553,52 @@ class Hand:
         hand_class = evaluator.get_rank_class(score)
         
         return score, hand_class
+    
+    def _evaluate_player_hand(self, player: Player) -> tuple[int, str]:
+        """Evaluate a player's hand strength for showdown."""
+        if not player.hole_cards or len(player.hole_cards) != 2:
+            raise ValueError(f"Player {player.id} has invalid hole cards: {player.hole_cards}")
+        
+        if len(self.community_cards) != 5:
+            raise ValueError(f"Invalid community cards length: {len(self.community_cards)}")
+        
+        evaluator = Evaluator()
+        score = evaluator.evaluate(player.hole_cards, self.community_cards)
+        hand_class = evaluator.get_rank_class(score)
+        hand_class_str = evaluator.class_to_string(hand_class)
+        
+        return score, hand_class_str
+    
+    def _rank_players_for_showdown(self) -> dict[int, int]:
+        """Rank all remaining players by hand strength (lower score = better hand)."""
+        remaining_players = [p for p in self.players if not p.has_folded]
+        
+        if len(remaining_players) < 2:
+            raise ValueError("Need at least 2 players for showdown")
+        
+        # Evaluate all hands
+        player_scores = {}
+        for player in remaining_players:
+            try:
+                score, hand_class = self._evaluate_player_hand(player)
+                player_scores[player.id] = score
+                self.logger.info(f"Player {player.id} ({player.position}): {hand_class} (score: {score})")
+            except Exception as e:
+                self.logger.error(f"Failed to evaluate player {player.id}: {e}")
+                raise
+        
+        # Sort by score (lower is better) and assign ranks
+        sorted_players = sorted(player_scores.items(), key=lambda x: x[1])
+        ranks = {}
+        
+        current_rank = 1
+        for i, (player_id, score) in enumerate(sorted_players):
+            if i > 0 and score != sorted_players[i-1][1]:
+                # Different score, advance rank
+                current_rank = i + 1
+            ranks[player_id] = current_rank
+        
+        return ranks
          
          
     def _get_community_cards(self, phase: Phase) -> str:

@@ -249,6 +249,57 @@ class PhaseController:
         
         self.logger.info(f"Pot awarded to player {winner.id} (uncontested)")
     
+    def _award_contested_pot(self) -> None:
+        """Award pot based on showdown rankings."""
+        print(f"DEBUG: _award_contested_pot called")
+        
+        if not self.hand:
+            self.logger.error("No hand reference available for contested pot awarding")
+            return
+        
+        # Prevent double awarding
+        if self.state.awarded_uncontested:
+            self.logger.info("Pot already awarded, skipping")
+            return
+        
+        # Get player rankings from hand evaluation
+        try:
+            ranks = self.hand._rank_players_for_showdown()
+            self.logger.info(f"Showdown rankings: {ranks}")
+        except Exception as e:
+            self.logger.error(f"Failed to rank players for showdown: {e}")
+            return
+        
+        # Build pots from pot manager
+        pots = self.hand.pot_manager.build_pots()
+        self.logger.info(f"Built {len(pots)} pots for distribution")
+        
+        # Get seat order for stable tie-breaking
+        seat_order = [p.id for p in sorted(self.hand.players, key=lambda p: p.seat_index)]
+        
+        # Use existing payout resolution logic
+        from .payouts import resolve_payouts
+        payouts = resolve_payouts(pots, ranks, seat_order)
+        
+        self.logger.info(f"Payouts calculated: {payouts}")
+        
+        # Apply payouts to player stacks
+        for player_id, won_cents in payouts.items():
+            if won_cents > 0:
+                player = next((p for p in self.hand.players if p.id == player_id), None)
+                if player:
+                    player.stack += won_cents
+                    self.logger.info(f"Player {player_id} won {won_cents} cents (${won_cents/100:.2f})")
+                    
+                    # Log the pot award
+                    self._log_pot_award(player_id, won_cents / 100.0)
+        
+        # Clear the pot manager after awarding
+        self.hand.pot_manager.contributed = {pid: 0 for pid in self.hand.pot_manager.contributed}
+        
+        self.state.awarded_uncontested = True
+        self.logger.info("Contested pot awarded successfully")
+    
     def _log_pot_award(self, winner_id: int, amount: float) -> None:
         """Log pot award action."""
         import quads.engine.hand as hand_module
