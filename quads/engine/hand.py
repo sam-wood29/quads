@@ -1232,10 +1232,14 @@ class Hand:
             if amount_to_call <= 0:
                 raise ValueError("Cannot call when no bet to call")
             if amount_to_call > player.stack:
-                raise ValueError(f"Cannot call {amount_to_call} with stack {player.stack}")
+                # Player is going all-in - they can call their entire stack
+                call_amount = player.stack
+            else:
+                call_amount = amount_to_call
+            
             return ValidatedAction(
                 action_type=ActionType.CALL,
-                amount=amount_to_call,
+                amount=call_amount,
                 is_full_raise=False,
                 raise_increment=0,
                 reopen_action=False
