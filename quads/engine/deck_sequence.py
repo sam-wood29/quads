@@ -1,7 +1,6 @@
-from typing import List
 
 
-def build_sequence_using_rotation(hole_cards: List[List[str]], board: List[str], rotated_indices: List[int]) -> List[str]:
+def build_sequence_using_rotation(hole_cards: list[list[str]], board: list[str], rotated_indices: list[int]) -> list[str]:
     """
     Build deck sequence that matches Hand._deal_hole_cards() rotation order.
     
@@ -13,7 +12,6 @@ def build_sequence_using_rotation(hole_cards: List[List[str]], board: List[str],
     Returns:
         List of card strings in exact draw order for ScriptedDeck
     """
-    n = len(rotated_indices)
     seq: list[str] = []
     
     # First pass: deal first card to each player in rotation order
@@ -30,7 +28,7 @@ def build_sequence_using_rotation(hole_cards: List[List[str]], board: List[str],
     return seq
 
 
-def build_sequence_from_hand(hand, hole_cards: List[List[str]], board: List[str]) -> List[str]:
+def build_sequence_from_hand(hand, hole_cards: list[list[str]], board: list[str]) -> list[str]:
     """
     Build deck sequence using Hand's actual rotation logic.
     

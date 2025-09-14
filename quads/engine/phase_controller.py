@@ -210,7 +210,7 @@ class PhaseController:
     
     def _award_uncontested_pot(self) -> None:
         """Award pot to the remaining active player."""
-        print(f"DEBUG: _award_uncontested_pot called")
+        print("DEBUG: _award_uncontested_pot called")
         
         if not self.hand:
             self.logger.error("No hand reference available for pot awarding")
@@ -251,7 +251,7 @@ class PhaseController:
     
     def _award_contested_pot(self) -> None:
         """Award pot based on showdown rankings."""
-        print(f"DEBUG: _award_contested_pot called")
+        print("DEBUG: _award_contested_pot called")
         
         if not self.hand:
             self.logger.error("No hand reference available for contested pot awarding")

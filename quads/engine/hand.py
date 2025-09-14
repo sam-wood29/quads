@@ -1,8 +1,6 @@
-from cmath import phase
 import sqlite3
 from collections import deque
 from collections.abc import Iterator
-from tkinter import N
 
 import quads.engine.player as quads_player
 from quads.deuces.card import Card
@@ -11,12 +9,12 @@ from quads.deuces.evaluator import Evaluator
 from quads.engine.betting_order import BettingOrder
 from quads.engine.enums import ActionType, Phase, RaiseSetting
 from quads.engine.game_state import GameState, PlayerState
-from quads.engine.hand_parser import parse_hole_cards
 from quads.engine.logger import get_logger
 from quads.engine.money import Cents, from_cents, to_cents
 from quads.engine.player import Player, Position
 from quads.engine.pot_manager import PotManager
 from quads.engine.validated_action import ValidatedAction
+
 from .phase_controller import PhaseController
 
 
@@ -67,26 +65,15 @@ class Hand:
         """Comprehensive string representation for debugging."""
         # Convert cents to dollars for display
         pot_dollars = self.pot
-        pot_manager_total = self.pot_manager.total_table_cents() / 100.0
         
         # Format community cards
         community_cards_str = "None"
         if self.community_cards:
             try:
-                from quads.deuces.card import Card
                 cards = [Card.int_to_str(c) for c in self.community_cards]
                 community_cards_str = ",".join(cards)
-            except:
+            except Exception:
                 community_cards_str = str(self.community_cards)
-        
-        # Player summaries
-        player_summaries = [str(p) for p in self.players]
-        
-        # Betting state
-        highest_bet_dollars = self.highest_bet / 100.0
-        last_raise_dollars = self.last_full_raise_increment / 100.0
-        
-        
         
         return (f"-----Hand----\n"
                f"id: {self.id}\n"
@@ -94,7 +81,8 @@ class Hand:
                f"dealer index {self.dealer_index}\n"
                f"player ids in button order:\n"
                f"{', '.join(str(p.id) for p in self.players_in_button_order)}\n"
-               f"pot: ${pot_dollars:.2f}\n")
+               f"pot: ${pot_dollars:.2f}\n"
+               f"community cards: {community_cards_str}\n")
         
     
     def _create_initial_game_state(self) -> GameState:
@@ -206,7 +194,7 @@ class Hand:
                     self._run_betting_round()
         
         print(self.phase_controller)
-        print(f"pre showdown")
+        print("pre showdown")
         print(f"\n{self.__str__()}\n")
         
         print(self.pot_manager.__str__())
