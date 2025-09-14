@@ -1,6 +1,8 @@
+from cmath import phase
 import sqlite3
 from collections import deque
 from collections.abc import Iterator
+from tkinter import N
 
 import quads.engine.player as quads_player
 from quads.deuces.card import Card
@@ -15,7 +17,6 @@ from quads.engine.money import Cents, from_cents, to_cents
 from quads.engine.player import Player, Position
 from quads.engine.pot_manager import PotManager
 from quads.engine.validated_action import ValidatedAction
-
 from .phase_controller import PhaseController
 
 
@@ -57,10 +58,44 @@ class Hand:
         
         # Initialize game state with a default phase first
         self.game_state = self._create_initial_game_state()
-        self.phase_controller = PhaseController(self.game_state, self.conn)
+        self.phase_controller = PhaseController(self.game_state, self.conn, self)
         
         # Set initial phase
         self.phase = Phase.DEAL
+        
+    def __str__(self) -> str:
+        """Comprehensive string representation for debugging."""
+        # Convert cents to dollars for display
+        pot_dollars = self.pot
+        pot_manager_total = self.pot_manager.total_table_cents() / 100.0
+        
+        # Format community cards
+        community_cards_str = "None"
+        if self.community_cards:
+            try:
+                from quads.deuces.card import Card
+                cards = [Card.int_to_str(c) for c in self.community_cards]
+                community_cards_str = ",".join(cards)
+            except:
+                community_cards_str = str(self.community_cards)
+        
+        # Player summaries
+        player_summaries = [str(p) for p in self.players]
+        
+        # Betting state
+        highest_bet_dollars = self.highest_bet / 100.0
+        last_raise_dollars = self.last_full_raise_increment / 100.0
+        
+        
+        
+        return (f"-----Hand----\n"
+               f"id: {self.id}\n"
+               f"phase: {self.phase}\n"
+               f"dealer index {self.dealer_index}\n"
+               f"player ids in button order:\n"
+               f"{', '.join(str(p.id) for p in self.players_in_button_order)}\n"
+               f"pot: ${pot_dollars:.2f}\n")
+        
     
     def _create_initial_game_state(self) -> GameState:
         """Create initial game state without circular dependency."""
@@ -128,7 +163,11 @@ class Hand:
     def phase(self, value):
         """Set phase through game_state."""
         self.game_state.phase = value.value if isinstance(value, Phase) else value
-    
+
+    def _update_game_state_pot(self):
+        """Update game state's pot field from pot manager."""
+        self.game_state.pot = self.pot_manager.total_table_cents() / 100.0
+
     def play(self):
         # Use phase controller for all phase transitions
         self.phase_controller.enter_phase(Phase.DEAL)
@@ -166,9 +205,18 @@ class Hand:
                     self._apply_community_deal(Phase.RIVER)
                     self._run_betting_round()
         
-        # Showdown
-        self.phase_controller.enter_phase(Phase.SHOWDOWN)
-        # TODO: Implement showdown logic
+        print(self.phase_controller)
+        print(f"pre showdown")
+        print(f"\n{self.__str__()}\n")
+        
+        print(self.pot_manager.__str__())
+        print(self.phase_controller.__str__())
+        
+        if self.phase_controller._is_uncontested():
+            self.phase_controller._award_uncontested_pot()
+        else:
+            self.phase_controller.enter_phase(Phase.SHOWDOWN)
+            # TODO: Implement showdown logic for contested pots
         
         return self.players, self.id, self.deck, False, self.script, self.dealer_index
         
@@ -256,12 +304,14 @@ class Hand:
         sb_player.round_contrib += sb_paid
         sb_player.current_bet += sb_paid
         self.pot_manager.post(sb_player.id, sb_paid)
+        self._update_game_state_pot()
         
         bb_player.stack -= bb_paid
         bb_player.hand_contrib += bb_paid
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
         self.pot_manager.post(bb_player.id, bb_paid)
+        self._update_game_state_pot()
         
         self.pot += (bb_paid + sb_paid) / 100  # Keep float pot for backward compatibility
         
@@ -668,11 +718,7 @@ class Hand:
                 
                 # Check if street should close after this action
                 if self.phase_controller.maybe_close_street_and_advance():
-                    # Street closed, handle uncalled bets before exiting
-                    if self.last_aggressor:
-                        aggressor = self._get_player_by_position(self.last_aggressor)
-                        if aggressor:
-                            self._return_uncalled_bet(aggressor)
+                    # Street closed, uncalled bets handled by phase controller
                     return
                 
                 # If this was a full raise, restart iteration after the raiser
@@ -887,6 +933,7 @@ class Hand:
         
         # Update pot manager
         self.pot_manager.post(player.id, additional_bet)
+        self._update_game_state_pot()
         
         # Update float pot for backward compatibility
         self.pot += additional_bet / 100
@@ -940,6 +987,7 @@ class Hand:
         
         # Update pot manager
         self.pot_manager.post(player.id, additional_bet)
+        self._update_game_state_pot()
         
         # Update float pot for backward compatibility
         self.pot += additional_bet / 100
@@ -992,6 +1040,7 @@ class Hand:
         
         # Update pot manager
         self.pot_manager.post(player.id, call_amount)
+        self._update_game_state_pot()
         
         # Update float pot for backward compatibility
         self.pot += call_amount / 100
@@ -1023,6 +1072,20 @@ class Hand:
         self.acted_since_last_full_raise.add(player.position)
         # Mark player as having checked this round
         player.has_checked_this_round = True
+        
+        # Log the check action
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=player,
+            action=ActionType.CHECK.value,
+            amount_cents=0,
+            phase=self.phase.value,
+            position=player.position
+        )
+        self.step_number += 1
 
     def apply_fold(self, player: Player, validated: ValidatedAction) -> None:
         """Apply a fold."""
@@ -1033,6 +1096,20 @@ class Hand:
         
         # Mark player as acted
         self.acted_since_last_full_raise.add(player.position)
+        
+        # Log the fold action
+        log_action(
+            conn=self.conn,
+            game_session_id=self.game_session_id,
+            hand_id=self.id,
+            step_number=self.step_number,
+            player=player,
+            action=ActionType.FOLD.value,
+            amount_cents=0,
+            phase=self.phase.value,
+            position=player.position
+        )
+        self.step_number += 1
 
     def _return_uncalled_bet(self, aggressor: Player) -> None:
         """Return uncalled portion of a bet to the aggressor."""
@@ -1148,9 +1225,6 @@ class Hand:
     def _get_player_by_position(self, pos: Position) -> Player | None:
         """Get player by position."""
         return next((p for p in self.players if p.position == pos), None)
-    
-    
-    
     
 def log_action(
     conn: sqlite3.Connection,

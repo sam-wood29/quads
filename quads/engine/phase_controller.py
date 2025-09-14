@@ -8,7 +8,9 @@ from .enums import ActionType, Phase
 from .logger import get_logger
 
 if TYPE_CHECKING:
+    
     from .game_state import GameState
+    from .hand import Hand
 
 logger = get_logger(__name__)
 
@@ -16,10 +18,55 @@ logger = get_logger(__name__)
 class PhaseController:
     """Finite state machine for managing poker hand phases."""
     
-    def __init__(self, state: "GameState", conn: sqlite3.Connection):
+    def __init__(self, state: "GameState", conn: sqlite3.Connection, hand: "Hand" = None):
         self.state = state
         self.conn = conn
+        self.hand = hand  # Reference to Hand instance for pot awarding
         self.logger = get_logger(__name__)
+    
+    def __str__(self) -> str:
+        """Comprehensive string representation for debugging."""
+        # Current phase and street info
+        current_phase = Phase(self.state.phase)
+        street_number = self.state.street_number
+        
+        # Betting state
+        highest_bet_dollars = self.state.highest_bet
+        last_raise_dollars = self.state.last_raise_increment
+        last_aggressor = self.state.last_aggressor_seat
+        
+        # Player states
+        player_states = []
+        for p in self.state.players:
+            status_flags = []
+            if p.has_folded:
+                status_flags.append("FOLDED")
+            if p.is_all_in:
+                status_flags.append("ALL_IN")
+            if self.state.acted_this_round.get(p.id, False):
+                status_flags.append("ACTED")
+            
+            status_str = ",".join(status_flags) if status_flags else "ACTIVE"
+            contrib_dollars = self.state.committed_this_round.get(p.id, 0.0)
+            
+            player_states.append(f"P{p.id}({p.position}, ${p.stack:.2f}, contrib=${contrib_dollars:.2f}, {status_str})")
+        
+        # Actionable seats
+        actionable_str = f"Actionable: {list(self.state.actionable_seats)}" if self.state.actionable_seats else "Actionable: None"
+        
+        # Street settlement status
+        is_settled = self._street_is_settled()
+        is_uncontested = self._is_uncontested()
+        all_matched = self._all_matched_and_rotated()
+        all_all_in = self._all_remaining_all_in()
+        
+        return (f"PhaseController(phase={current_phase.value}, street={street_number}, "
+                f"highest_bet=${highest_bet_dollars:.2f}, last_raise=${last_raise_dollars:.2f}, "
+                f"last_aggressor=P{last_aggressor}, settled={is_settled}, "
+                f"uncontested={is_uncontested}, all_matched={all_matched}, all_all_in={all_all_in})\n"
+                f"    Players: [{', '.join(player_states)}]\n"
+                f"    {actionable_str}\n"
+                f"    Awarded uncontested: {self.state.awarded_uncontested}")
     
     def enter_phase(self, to_phase: Phase) -> None:
         """Transition to `to_phase`, log `phase_advance`, and run per-phase hooks."""
@@ -79,6 +126,12 @@ class PhaseController:
         
         # Check for uncontested pot
         if self._is_uncontested():
+            # Handle uncalled bets BEFORE awarding pot
+            if self.hand and self.hand.last_aggressor:
+                aggressor = self.hand._get_player_by_position(self.hand.last_aggressor)
+                if aggressor:
+                    self.hand._return_uncalled_bet(aggressor)
+            
             self._award_uncontested_pot()
             self.enter_phase(Phase.SHOWDOWN)
             return True
@@ -110,7 +163,13 @@ class PhaseController:
     
     def _is_uncontested(self) -> bool:
         """Check if only one active player remains."""
-        active_players = [p for p in self.state.players if not p.has_folded]
+        if not self.hand:
+            # Fallback to GameState players if no hand reference
+            active_players = [p for p in self.state.players if not p.has_folded]
+            return len(active_players) == 1
+        
+        # Use actual Player objects from Hand for accurate fold status
+        active_players = [p for p in self.hand.players if not p.has_folded]
         return len(active_players) == 1
     
     def _all_matched_and_rotated(self) -> bool:
@@ -135,35 +194,58 @@ class PhaseController:
     
     def _all_remaining_all_in(self) -> bool:
         """Check if all remaining players are all-in."""
-        remaining_players = [p for p in self.state.players if not p.has_folded]
+        if not self.hand:
+            # Fallback to GameState players if no hand reference
+            remaining_players = [p for p in self.state.players if not p.has_folded]
+            if len(remaining_players) <= 1:
+                return False
+            return all(p.is_all_in for p in remaining_players)
+        
+        # Use actual Player objects from Hand for accurate status
+        remaining_players = [p for p in self.hand.players if not p.has_folded]
         if len(remaining_players) <= 1:
             return False
         
-        return all(p.is_all_in for p in remaining_players)
+        return all(p.all_in for p in remaining_players)
     
     def _award_uncontested_pot(self) -> None:
         """Award pot to the remaining active player."""
         print(f"DEBUG: _award_uncontested_pot called")
         
-        winner = next((p for p in self.state.players if not p.has_folded), None)
+        if not self.hand:
+            self.logger.error("No hand reference available for pot awarding")
+            return
+        
+        # Prevent double awarding
+        if self.state.awarded_uncontested:
+            self.logger.info("Pot already awarded, skipping")
+            return
+        
+        # Find the winner using actual Player objects from Hand
+        winner = next((p for p in self.hand.players if not p.has_folded), None)
         if not winner:
             self.logger.error("No winner found for uncontested pot")
             return
         
         print(f"DEBUG: Winner found: player {winner.id}")
         print(f"DEBUG: Winner stack before: {winner.stack}")
-        print(f"DEBUG: Pot amount: {self.state.pot}")
         
-        # FIX: Use self.state.pot instead of pot_manager and convert to cents
-        pot_cents = int(self.state.pot * 100)  # Convert dollars to cents
+        # Get pot amount from pot_manager (in cents)
+        pot_cents = self.hand.pot_manager.total_table_cents()
+        print(f"DEBUG: Pot amount: {pot_cents} cents (${pot_cents/100:.2f})")
+        
+        # Award the pot to the winner
         winner.stack += pot_cents
         
         print(f"DEBUG: Winner stack after: {winner.stack}")
         
+        # Clear the pot manager after awarding
+        self.hand.pot_manager.contributed = {pid: 0 for pid in self.hand.pot_manager.contributed}
+        
         self.state.awarded_uncontested = True
         
         # Log the pot award
-        self._log_pot_award(winner.id, self.state.pot)
+        self._log_pot_award(winner.id, pot_cents / 100.0)  # Convert to dollars for logging
         
         self.logger.info(f"Pot awarded to player {winner.id} (uncontested)")
     

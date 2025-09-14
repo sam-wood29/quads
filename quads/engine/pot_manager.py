@@ -39,6 +39,38 @@ class PotManager:
         self.contributed: dict[PlayerId, Cents] = {pid: 0 for pid in players}
         self.folded: set[PlayerId] = set()
     
+    def __str__(self) -> str:
+        """Comprehensive string representation for debugging."""
+        # Convert cents to dollars for display
+        total_cents = self.total_table_cents()
+        total_dollars = total_cents / 100.0
+        
+        # Format contributions
+        contrib_strs = []
+        for pid in sorted(self.contributed.keys()):
+            contrib_cents = self.contributed[pid]
+            contrib_dollars = contrib_cents / 100.0
+            status = "FOLDED" if pid in self.folded else "ACTIVE"
+            contrib_strs.append(f"P{pid}: ${contrib_dollars:.2f} ({status})")
+        
+        # Format folded players
+        folded_str = f"Folded: {sorted(self.folded)}" if self.folded else "Folded: None"
+        
+        # Build pots for display
+        pots = self.build_pots()
+        pot_strs = []
+        for i, pot in enumerate(pots):
+            pot_dollars = pot.amount_cents / 100.0
+            eligible_str = ",".join(f"P{pid}" for pid in sorted(pot.eligible))
+            pot_strs.append(f"Pot{i+1}: ${pot_dollars:.2f} [eligible: {eligible_str}]")
+        
+        pots_str = "\n    ".join(pot_strs) if pot_strs else "No pots built"
+        
+        return (f"PotManager(total=${total_dollars:.2f}, "
+                f"contributions=[{', '.join(contrib_strs)}], "
+                f"{folded_str})\n"
+                f"    Built pots:\n    {pots_str}")
+    
     def post(self, pid: PlayerId, cents: Cents) -> None:
         """
         Move chips from player to table (caller handles stack decrement).

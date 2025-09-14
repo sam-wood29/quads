@@ -58,6 +58,7 @@ def get_rotated_indices(hand) -> list[int]:
     """
     # Method 1: Use players_in_button_order if available
     if hasattr(hand, "players_in_button_order") and hand.players_in_button_order:
+        print("Getting players in button order.")
         players = hand.players_in_button_order
         # Apply the same rotation logic as _deal_hole_cards()
         n = 1 % len(players)  # This is the rotation offset

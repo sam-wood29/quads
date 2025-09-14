@@ -24,3 +24,9 @@ __pycache__/
 
 # database
 *.db
+
+# vscode
+*.vscode/
+
+# docs
+*docs/

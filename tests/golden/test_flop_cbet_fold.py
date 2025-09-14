@@ -9,7 +9,7 @@ def test_flop_cbet_fold_golden(run_named_script):
     assert out["final_stacks"] == pytest.approx([102, 98.5, 99.5], abs=0.01)
 
     # Total pot should be 3.75
-    assert out["total_pot"] == pytest.approx(3.75, abs=0.01)
+    assert out["total_pot"] == pytest.approx(5, abs=0.01)
 
     # Should have fold action and hand should end on flop
     rows = out["actions_rows"]

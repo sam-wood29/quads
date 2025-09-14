@@ -22,7 +22,42 @@ class Player:
         self.seat_index = seat_index
     
     def __str__(self) -> str:
-        return f"{self.id}, {self.name}, {self.stack/100:.2f}, {self.position}, {self.controller.controller_type}"
+        """Comprehensive string representation for debugging."""
+        # Convert cents to dollars for display
+        stack_dollars = self.stack / 100.0
+        round_contrib_dollars = self.round_contrib / 100.0
+        hand_contrib_dollars = self.hand_contrib / 100.0
+        current_bet_dollars = self.current_bet / 100.0
+        
+        # Format hole cards
+        hole_cards_str = "None"
+        if self.hole_cards:
+            if isinstance(self.hole_cards, list) and len(self.hole_cards) == 2:
+                try:
+                    from quads.deuces.card import Card
+                    cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in self.hole_cards]
+                    hole_cards_str = f"{cards[0]},{cards[1]}"
+                except:
+                    hole_cards_str = str(self.hole_cards)
+            else:
+                hole_cards_str = str(self.hole_cards)
+        
+        # Status flags
+        status_flags = []
+        if self.has_folded:
+            status_flags.append("FOLDED")
+        if self.all_in:
+            status_flags.append("ALL_IN")
+        if self.has_acted:
+            status_flags.append("ACTED")
+        if hasattr(self, 'has_checked_this_round') and self.has_checked_this_round:
+            status_flags.append("CHECKED")
+        
+        status_str = ",".join(status_flags) if status_flags else "ACTIVE"
+        
+        return (f"P{self.id}({self.position}, ${stack_dollars:.2f}, "
+                f"bet=${current_bet_dollars:.2f}, contrib=${hand_contrib_dollars:.2f}, "
+                f"cards=[{hole_cards_str}], {status_str})")
     
 class Position(str, Enum):
     BUTTON = "button"
