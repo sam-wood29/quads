@@ -1,4 +1,3 @@
-import pytest
 from quads.engine.run_scripted_harness import run_script
 
 

@@ -1,6 +1,7 @@
-from typing import Iterable
-from quads.deuces.deck import Deck
+from collections.abc import Iterable
+
 from quads.deuces.card import Card
+from quads.deuces.deck import Deck
 
 
 class ScriptedDeck(Deck):

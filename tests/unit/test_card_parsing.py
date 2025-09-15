@@ -1,4 +1,5 @@
 import pytest
+
 from quads.deuces.card import Card
 
 

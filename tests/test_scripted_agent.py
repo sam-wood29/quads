@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import Mock
-from quads.engine.scripted_agent import ScriptedAgent
+
+import pytest
+
 from quads.engine.enums import ActionType
+from quads.engine.scripted_agent import ScriptedAgent
 from quads.engine.validated_action import ValidatedAction
 
 

@@ -1,7 +1,8 @@
+from unittest.mock import Mock
+
 import pytest
 
 from quads.engine.hand import Hand, Phase
-from unittest.mock import Mock
 
 
 def test_community_cards_methods_directly():

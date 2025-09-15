@@ -13,7 +13,7 @@ def load_script(path: str | Path) -> dict[str, Any]:
     Returns:
         Normalized script dict with consistent key types
     """
-    with open(Path(path), "r") as f:
+    with open(Path(path)) as f:
         raw = json.load(f)
     return _normalize_keys(raw)
 

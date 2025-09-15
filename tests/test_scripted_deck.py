@@ -1,6 +1,8 @@
 import pytest
-from quads.deuces.scripted_deck import ScriptedDeck
+
 from quads.deuces.card import Card
+from quads.deuces.scripted_deck import ScriptedDeck
+
 
 def test_scripted_deck_draw_order():
     """Test that ScriptedDeck yields cards in exact sequence."""

@@ -1,6 +1,10 @@
-import pytest
 from unittest.mock import Mock
-from quads.engine.deck_sequence import build_sequence_using_rotation, build_sequence_from_hand, get_rotated_indices
+
+from quads.engine.deck_sequence import (
+    build_sequence_from_hand,
+    build_sequence_using_rotation,
+    get_rotated_indices,
+)
 from quads.engine.rotation_probe import debug_rotation
 
 

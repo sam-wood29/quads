@@ -1,7 +1,8 @@
-from typing import Iterator, Callable
+from collections.abc import Callable, Iterator
+
 from quads.engine.enums import ActionType
-from quads.engine.validated_action import ValidatedAction
 from quads.engine.money import to_cents
+from quads.engine.validated_action import ValidatedAction
 
 
 class ScriptedAgent:

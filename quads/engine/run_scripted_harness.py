@@ -1,18 +1,19 @@
-import sqlite3
-from typing import Any, List
-from quads.deuces.scripted_deck import ScriptedDeck
-from quads.engine.player import Player
-from quads.engine.hand import Hand
-from quads.engine.scripted_agent import ScriptedAgent
-from quads.engine.deck_sequence import get_rotated_indices, build_sequence_using_rotation
-from quads.engine.script_loader import get_script_actions_by_seat
-from quads.engine.va_factory import make_va_factory
-from quads.engine.money import to_cents, from_cents
-from quads.deuces.deck import Deck
-from quads.engine.controller import Controller, ControllerType
-from quads.engine.hand import Phase, Position, BettingOrder, ActionType
-from quads.engine.hand import log_action
 import pprint
+import sqlite3
+from typing import Any
+
+from quads.deuces.deck import Deck
+from quads.deuces.scripted_deck import ScriptedDeck
+from quads.engine.controller import Controller, ControllerType
+from quads.engine.deck_sequence import (
+    build_sequence_using_rotation,
+    get_rotated_indices,
+)
+from quads.engine.hand import (
+    Hand,
+)
+from quads.engine.money import from_cents, to_cents
+from quads.engine.player import Player
 
 pp = pprint.PrettyPrinter(indent=2, width=80, depth=None, compact=False)
 
@@ -134,9 +135,9 @@ def run_script(script: dict[str, Any]):
         big_blind=script["big_blind"]
     )
     
-    print(f"\n----Initial Hand State----\n")
+    print("\n----Initial Hand State----\n")
     print(str(hand))
-    print(f"\n")
+    print("\n")
     
     # Print initial player stacks
     print("DEBUG: Initial player stacks:")

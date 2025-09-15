@@ -1,6 +1,7 @@
 import pytest
-from quads.engine.script_loader import load_script
+
 from quads.engine.run_scripted_harness import run_script
+from quads.engine.script_loader import load_script
 
 
 @pytest.fixture

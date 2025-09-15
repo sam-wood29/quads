@@ -25,7 +25,6 @@ class Player:
         """Comprehensive string representation for debugging."""
         # Convert cents to dollars for display
         stack_dollars = self.stack / 100.0
-        round_contrib_dollars = self.round_contrib / 100.0
         hand_contrib_dollars = self.hand_contrib / 100.0
         current_bet_dollars = self.current_bet / 100.0
         
@@ -37,7 +36,7 @@ class Player:
                     from quads.deuces.card import Card
                     cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in self.hole_cards]
                     hole_cards_str = f"{cards[0]},{cards[1]}"
-                except:
+                except Exception:
                     hole_cards_str = str(self.hole_cards)
             else:
                 hole_cards_str = str(self.hole_cards)

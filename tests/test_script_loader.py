@@ -1,5 +1,10 @@
 import pytest
-from quads.engine.script_loader import load_script, _normalize_keys, get_script_actions_by_seat, validate_script_structure
+
+from quads.engine.script_loader import (
+    _normalize_keys,
+    get_script_actions_by_seat,
+    validate_script_structure,
+)
 
 
 def test_normalize_string_keys():

@@ -1,5 +1,3 @@
-from quads.engine.validated_action import ValidatedAction
-from quads.engine.enums import ActionType
 
 
 def make_va_factory(hand):

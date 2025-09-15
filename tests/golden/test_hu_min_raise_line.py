@@ -1,5 +1,6 @@
-import pytest
 from pprint import pprint
+
+import pytest
 
 
 def test_hu_min_raise_line_golden(run_named_script):
