@@ -8,9 +8,7 @@ This module handles all pot-related operations including:
 """
 
 from dataclasses import dataclass
-
 from .money import Cents, nonneg
-
 PlayerId = int
 
 
@@ -24,9 +22,8 @@ class Pot:
 class PotManager:
     """
     Manages pot construction and chip movements.
-    
     Tracks player contributions and builds side pots for all-in scenarios.
-    Keeps betting logic simpler by centralizing pot operations.
+    Centralized Pot opperations
     """
     
     def __init__(self, players: set[PlayerId]):

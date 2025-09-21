@@ -68,7 +68,7 @@ class RulesEngine:
         if can_raise:
             min_raise = self._get_min_raise_amount(state)
             max_raise = player['stack']
-            raise_amounts = self._generate_raise_amounts(min_raise, max_raise)
+            raise_amounts = self._generate_raise_amounts(min_raise, max_raise, state, player_id)
         
         return ValidActions(
             player_id=player_id,
@@ -287,8 +287,67 @@ class RulesEngine:
             return self.big_blind_cents
         return state.highest_bet + state.last_raise_increment
     
-    def _generate_raise_amounts(self, min_raise: Cents, max_raise: Cents) -> list[Cents]:
-        """Generate valid raise amounts."""
+    def get_discrete_raise_amounts(self, min_raise: Cents, max_raise: Cents, state: GameStateSnapshot, player_id: int) -> list[Cents]:
+        """
+        Generate discrete raise buckets: [min_raise_to, 2.5x_open, 3x_open, pot, all_in]
+        
+        Args:
+            min_raise: Minimum legal raise amount
+            max_raise: Maximum raise amount (player's stack)
+            state: Current game state for pot calculation
+            player_id: Player making the raise
+            
+        Returns:
+            List of valid raise amounts in cents
+        """
+        player = self._get_player(state, player_id)
+        if not player:
+            return []
+        
+        buckets = []
+        
+        # 1. Min raise (always included if legal)
+        if min_raise <= max_raise:
+            buckets.append(min_raise)
+        
+        # 2. Calculate pot size for pot-sized raises
+        pot_size = self._calculate_pot_size(state)
+        
+        # 3. Generate discrete buckets
+        discrete_amounts = [
+            min_raise,  # Already added above
+            self._calculate_2_5x_open(state, min_raise),
+            self._calculate_3x_open(state, min_raise), 
+            pot_size,
+            player['stack']  # All-in
+        ]
+        
+        # 4. Filter by legality and stack constraints
+        for amount in discrete_amounts:
+            if (amount >= min_raise and 
+                amount <= max_raise and 
+                amount not in buckets):
+                buckets.append(amount)
+        
+        # Sort buckets for consistent ordering
+        buckets.sort()
+        
+        return buckets
+    
+    def get_non_discrete_raise_amounts(self, min_raise: Cents, max_raise: Cents, state: GameStateSnapshot, player_id: int) -> list[Cents]:
+        """
+        Generate non-discrete raise amounts using small blind increments.
+        Better for manual players who want fine-grained control.
+        
+        Args:
+            min_raise: Minimum legal raise amount
+            max_raise: Maximum raise amount (player's stack)
+            state: Current game state
+            player_id: Player making the raise
+            
+        Returns:
+            List of valid raise amounts in cents
+        """
         amounts = []
         current = min_raise
         step = self.small_blind_cents
@@ -298,6 +357,35 @@ class RulesEngine:
             current += step
         
         return amounts
+    
+    def _generate_raise_amounts(self, min_raise: Cents, max_raise: Cents, state: GameStateSnapshot, player_id: int) -> list[Cents]:
+        """
+        Default raise amount generation - uses discrete buckets.
+        For backward compatibility, delegates to get_discrete_raise_amounts.
+        """
+        return self.get_discrete_raise_amounts(min_raise, max_raise, state, player_id)
+    
+    def _calculate_pot_size(self, state: GameStateSnapshot) -> Cents:
+        """Calculate current pot size for pot-sized raises."""
+        return state.pot_cents
+    
+    def _calculate_2_5x_open(self, state: GameStateSnapshot, min_raise: Cents) -> Cents:
+        """Calculate 2.5x the opening bet size."""
+        if state.highest_bet == 0:
+            # No bet yet, use big blind as reference
+            return int(self.big_blind_cents * 2.5)
+        else:
+            # There's a bet, use min_raise as reference
+            return int(min_raise * 2.5)
+    
+    def _calculate_3x_open(self, state: GameStateSnapshot, min_raise: Cents) -> Cents:
+        """Calculate 3x the opening bet size."""
+        if state.highest_bet == 0:
+            # No bet yet, use big blind as reference
+            return int(self.big_blind_cents * 3.0)
+        else:
+            # There's a bet, use min_raise as reference
+            return int(min_raise * 3.0)
     
     def _create_state_dict(self, state: GameStateSnapshot) -> dict[str, Any]:
         """Create a dictionary representation of state for AppliedAction."""

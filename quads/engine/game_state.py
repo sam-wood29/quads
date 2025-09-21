@@ -70,6 +70,7 @@ class GameState:
         self.last_aggressor_seat = None
         self.acted_this_round = {p.id: False for p in self.players if not p.has_folded}
         self.committed_this_round = {p.id: 0.0 for p in self.players if not p.has_folded}
+        # TODO: what is actionabe seats? why is it useful?
         self.actionable_seats.clear()
     
     def next_step_number(self) -> int:

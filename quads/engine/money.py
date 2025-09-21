@@ -116,18 +116,7 @@ def add_cents(*values: Cents) -> Cents:
 
 
 def nonneg(cents: Cents) -> Cents:
-    """
-    Assert that cents amount is non-negative.
-    
-    Args:
-        cents: Integer cents
-        
-    Returns:
-        Same cents value if non-negative
-        
-    Raises:
-        ValueError: If cents is negative
-    """
+    """Assert that cents amount is non-negative."""
     if not isinstance(cents, int):
         raise ValueError(f"Cents must be integer, got {type(cents)}")
     

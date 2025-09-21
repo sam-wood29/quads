@@ -1,7 +1,6 @@
 import sqlite3
 from collections import deque
 from collections.abc import Iterator
-
 import quads.engine.player as quads_player
 from quads.deuces.card import Card
 from quads.deuces.deck import Deck
@@ -170,6 +169,7 @@ class Hand:
         
         self.players = self._reset_players()
         # Only advance dealer for non-scripted hands
+        # scripted hands will need to manually advance the dealer
         if self.script is None:
             self.dealer_index = self._advance_dealer()
         self.players_in_button_order = self._assign_positions()
@@ -235,6 +235,7 @@ class Hand:
         return self.players
     
     def _advance_dealer(self):
+        """Moves dealer position left once."""
         players = sorted(
             [p for p in self.players],
             key=lambda p: p.seat_index
@@ -249,7 +250,8 @@ class Hand:
         dealer_index = seat_indices[next_idx]
         return dealer_index
     
-    def _assign_positions(self):
+    def _assign_positions(self) -> list:
+        """Returns players in order starting with the button"""
         players=sorted(
             [p for p in self.players],
             key=lambda p: p.seat_index
@@ -274,6 +276,7 @@ class Hand:
     
     def _post_blinds(self):
         # MONEY: All blind calculations use cents
+        # 1. Get how much small / big blind players are going to pay
         sb_amount = self.small_blind_cents
         bb_amount = self.big_blind_cents
         ordered_player_list = self.players_in_button_order
@@ -285,28 +288,37 @@ class Hand:
             sb_player = ordered_player_list[1]
             bb_player = ordered_player_list[2]
         
+        # This could be adjusted for certainty. Stacks should be defined as one datatype originally.
         # Convert player stacks to cents if they aren't already
         sb_player.stack = int(sb_player.stack * 100) if isinstance(sb_player.stack, float) else sb_player.stack
         bb_player.stack = int(bb_player.stack * 100) if isinstance(bb_player.stack, float) else bb_player.stack
         
+        # player is all in if stack is less than blind
         sb_paid = min(sb_amount, sb_player.stack)
         bb_paid = min(bb_amount, bb_player.stack)
         
-        # Update player state and pot manager
+        # 2. update data structures to reflect posting of blinds
+        # blind player
+        # hand.pot_manager
         sb_player.stack -= sb_paid
         sb_player.hand_contrib += sb_paid
         sb_player.round_contrib += sb_paid
         sb_player.current_bet += sb_paid
+        
+        # Take a look at what this does
         self.pot_manager.post(sb_player.id, sb_paid)
+        # keeping gamestate.pot as float right now for backward compatability - I think
         self._update_game_state_pot()
         
         bb_player.stack -= bb_paid
         bb_player.hand_contrib += bb_paid
         bb_player.round_contrib += bb_paid
         bb_player.current_bet += bb_paid
+        
         self.pot_manager.post(bb_player.id, bb_paid)
         self._update_game_state_pot()
         
+        # "Float pot for backward compatabiltiy". Not sure if that is entirely nescessary.
         self.pot += (bb_paid + sb_paid) / 100  # Keep float pot for backward compatibility
         
         # Log actions using cents
@@ -314,6 +326,9 @@ class Hand:
         game_session_id = self.game_session_id
         hand_id = self.id
         step_number = self.step_number
+        
+        # 3. Log the Actions
+        
         
         # Log SB
         player = sb_player
@@ -355,24 +370,30 @@ class Hand:
     def _deal_hole_cards(self):
         """Deal hole cards using structured script format."""
         if self.script is None:
-            raise RuntimeError("No script provided for hole card dealing")
+            raise RuntimeError("Non scripted dealing not implemented yet. Implement here.")
         
+        # Scipted dealing here
+        # hole cards here are implemented as list of lists I think -?
         hole_cards = self.script.get("hole_cards", [])
         if not hole_cards:
             raise RuntimeError("No hole cards in script")
         
         # Deal cards to each player in button order
+        # Not entirely sure how this works at a glance -? 
+        # 1. Assign hole cards
         for i, player in enumerate(self.players_in_button_order):
+            # i starts at 0 makes sense to be exclusive
             if i < len(hole_cards):
                 cards = hole_cards[i]
                 if len(cards) != 2:
                     raise RuntimeError(f"Expected 2 hole cards, got {len(cards)}")
                 
-                # Convert card strings to Deuces ints
+                # Convert card strings to Deuces ints - singular datatype
                 card_ints = Card.hand_to_binary(cards)
                 player.hole_cards = card_ints
                 
                 # Log the deal
+                # 2. Log into the DB
                 log_action(
                     self.conn, self.game_session_id, self.id, 
                     self.game_state.next_step_number(),
@@ -397,13 +418,66 @@ class Hand:
                 ordered.append(candidate)
         return ordered
     
-    def _generate_raise_amounts(self, player: Player, min_raise: int, max_raise: int) -> list[int]:
-        """Generate valid raise amounts."""
+    def get_discrete_raise_amounts(self, player: Player, min_raise: int, max_raise: int) -> list[int]:
+        """
+        Generate discrete raise buckets: [min_raise_to, 2.5x_open, 3x_open, pot, all_in]
+        
+        Args:
+            player: Player making the raise
+            min_raise: Minimum legal raise amount
+            max_raise: Maximum raise amount (player's stack)
+            
+        Returns:
+            List of valid raise amounts in cents
+        """
+        buckets = []
+        
+        # 1. Min raise (always included if legal)
+        if min_raise <= max_raise:
+            buckets.append(min_raise)
+        
+        # 2. Calculate pot size for pot-sized raises
+        pot_size = self.pot_manager.total_table_cents()
+        
+        # 3. Generate discrete buckets
+        discrete_amounts = [
+            min_raise,  # Already added above
+            self._calculate_2_5x_open(min_raise),
+            self._calculate_3x_open(min_raise), 
+            pot_size,
+            player.stack  # All-in
+        ]
+        
+        # 4. Filter by legality and stack constraints
+        for amount in discrete_amounts:
+            if (amount >= min_raise and 
+                amount <= max_raise and 
+                amount not in buckets):
+                buckets.append(amount)
+        
+        # Sort buckets for consistent ordering
+        buckets.sort()
+        
+        return buckets
+    
+    def get_non_discrete_raise_amounts(self, player: Player, min_raise: int, max_raise: int) -> list[int]:
+        """
+        Generate non-discrete raise amounts using small blind increments.
+        Better for manual players who want fine-grained control.
+        
+        Args:
+            player: Player making the raise
+            min_raise: Minimum legal raise amount
+            max_raise: Maximum raise amount (player's stack)
+            
+        Returns:
+            List of valid raise amounts in cents
+        """
         amounts = []
         current = min_raise
         step = self.small_blind_cents  # Use cents
         
-        # Fix: max_to should be current_bet + stack (total amount player can raise to)
+        # max_to should be current_bet + stack (total amount player can raise to)
         max_to = player.current_bet + player.stack
         
         while current <= max_to and current <= max_raise:
@@ -412,8 +486,37 @@ class Hand:
         
         return amounts
     
+    def _generate_raise_amounts(self, player: Player, min_raise: int, max_raise: int) -> list[int]:
+        """
+        Default raise amount generation - uses discrete buckets.
+        For backward compatibility, delegates to get_discrete_raise_amounts.
+        """
+        return self.get_discrete_raise_amounts(player, min_raise, max_raise)
+    
+    def _calculate_2_5x_open(self, min_raise: int) -> int:
+        """Calculate 2.5x the opening bet size."""
+        if self.highest_bet == 0:
+            # No bet yet, use big blind as reference
+            return int(self.big_blind_cents * 2.5)
+        else:
+            # There's a bet, use min_raise as reference
+            return int(min_raise * 2.5)
+    
+    def _calculate_3x_open(self, min_raise: int) -> int:
+        """Calculate 3x the opening bet size."""
+        if self.highest_bet == 0:
+            # No bet yet, use big blind as reference
+            return int(self.big_blind_cents * 3.0)
+        else:
+            # There's a bet, use min_raise as reference
+            return int(min_raise * 3.0)
+    
     def _get_valid_actions(self, player: Player, amount_to_call: int) -> dict:
-        """Get valid actions for a player."""
+        """
+        Get valid actions for a player.
+        
+        Returns: Dict: valid actions
+        """
         if self.raise_settings != RaiseSetting.STANDARD:
             raise RuntimeError("Raise settings not implemented.")
         
@@ -441,11 +544,17 @@ class Hand:
             
         
     def _select_validate_action(self, ap: Player, valid_actions: dict):
-        """Select and validate action from structured script format."""
+        """
+        Select and validate action from structured script format.
+        
+        Returns: 
+        """
+        # TODO: add switch for agentic / manual inputs here
         if self.script is None:
             raise RuntimeError("No script provided")
         
         # Simplified debug output
+        # This may be good to look at for debugging output
         current_phase = self.phase.value
         phase_actions = self.script.get(current_phase, {}).get("actions", {})
         player_actions = phase_actions.get(ap.seat_index, [])
@@ -475,14 +584,16 @@ class Hand:
         amount_to_call = self.highest_bet - ap.current_bet
         valid_actions = self._get_valid_actions(player=ap, amount_to_call=amount_to_call)
         validated_action = self._select_validate_action(ap=ap, valid_actions=valid_actions)
+        # NOTE: Validated action type not nesscessarily used fully...
         selected_action = validated_action.action_type
         selected_amount = validated_action.amount
         return selected_action, selected_amount, amount_to_call
     
     def handle_player_action(self, game_state: GameState, selected_action: ActionType, selected_amount: int,
                          acting_player: Player, amount_to_call: int, highest_bet: int):
-        """Handle a player action with the new validation/application pattern."""
+        """Handle a player action."""
         
+        # Redundant, but whatever
         # selected_amount is already in cents, just ensure it's an int
         amount_cents = int(selected_amount) if selected_amount else 0
         
@@ -517,6 +628,7 @@ class Hand:
 
     def _log_betting_state_before(self, player: Player, validated: ValidatedAction):
         """Log betting state before action."""
+        # TODO: NOTE: This use of logging is a cluster
         self.logger.debug(
             f"Before action: {player.position} {validated.action_type.value} "
             f"highest_bet={self.highest_bet}, "
@@ -526,6 +638,7 @@ class Hand:
 
     def _log_betting_state_after(self, player: Player, validated: ValidatedAction):
         """Log betting state after action."""
+        # NOTE: Again, this method of logging really upests me
         self.logger.debug(
             f"After action: {player.position} {validated.action_type.value} "
             f"highest_bet={self.highest_bet}, "
@@ -704,7 +817,7 @@ class Hand:
 
 
     def _run_betting_round(self):
-        """Run a complete betting round using the new reopen logic."""
+        """Run a complete betting round."""
         # Use phase controller to start betting round
         self.phase_controller.start_betting_round()
         
@@ -728,6 +841,7 @@ class Hand:
             for pos in self.iter_action_order(order, start_from=first_to_act):
                 if pos in self.acted_since_last_full_raise and self.last_aggressor is None:
                     # Everyone has acted since last raise (or from start); round ends
+                    # TODO: investigate hand.acted_since_last_full_raise_data_structure
                     break
                 
                 # Get the player at this position
@@ -741,14 +855,11 @@ class Hand:
                     acting_player=acting_player, game_state=game_state
                 )
 
-                # selected_amount is already in cents from _select_validate_action
-                selected_amount_cents = selected_amount or 0
-
                 # Handle the action
                 result = self.handle_player_action(
                     game_state=game_state,
                     selected_action=selected_action,
-                    selected_amount=selected_amount_cents,
+                    selected_amount=selected_amount,
                     acting_player=acting_player,
                     amount_to_call=amount_to_call,
                     highest_bet=self.highest_bet
@@ -776,6 +887,7 @@ class Hand:
                 break
         
         # Handle uncalled bets at end of betting round
+        # TODO: NOTE: is this even possible, if not, git rid potentially.
         if self.last_aggressor:
             aggressor = self._get_player_by_position(self.last_aggressor)
             if aggressor:
@@ -785,8 +897,10 @@ class Hand:
         player_states = []
         for p in self.players:
             # Convert integer hole cards to string if needed
+            # TODO: Can be removed I think barring test functionality?
+            # p.hole_cards should always be a list of cards
+            # Gamestate holds cards as strs
             if p.hole_cards and isinstance(p.hole_cards, list):
-                from quads.deuces.card import Card
                 hole_cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in p.hole_cards]
             else:
                 hole_cards = None
@@ -812,6 +926,7 @@ class Hand:
             dealer_player = next((p for p in self.players if p.seat_index == self.dealer_index), None)
             if dealer_player:
                 dealer_position = str(dealer_player.position)
+        # Game state holds list of player states
         return GameState(
             hand_id=self.id,
             phase=str(self.phase),
@@ -874,7 +989,6 @@ class Hand:
             return
         
         # Use deque for efficient rotation
-        from collections import deque
         q = deque(order)
         
         if start_from is not None:
@@ -937,8 +1051,9 @@ class Hand:
     def _reset_betting_round_state(self):
         """Reset betting round state for new street."""
         self.last_aggressor = None
+        # How are we using this variable?
         self.acted_since_last_full_raise.clear()
-        self.last_full_raise_increment = self.big_blind_cents
+        self.last_full_raise_increment = self.big_blind_cents # makes sense
         
         if self.phase == Phase.PREFLOP:
             # Preflop: blinds are already posted, so highest_bet should be BB
@@ -950,6 +1065,7 @@ class Hand:
         # Reset per-player per-street flags and betting state
         for player in self.players:
             if self.phase != Phase.PREFLOP:
+                # if not postflop, should not need to reset here.
                 # Postflop: reset current_bet to 0 (no blinds)
                 player.current_bet = 0
             # Always reset the checked flag for new streets
@@ -1039,7 +1155,7 @@ class Hand:
         # Update betting state
         self.highest_bet = raise_to
         
-        if validated.is_full_raise:
+        if validated.is_full_raise: # TODO: NOTE: again, not entirely sure on this one...
             # Full raise - reopen action
             self.last_full_raise_increment = validated.raise_increment
             self.last_aggressor = player.position
@@ -1154,6 +1270,7 @@ class Hand:
     def _return_uncalled_bet(self, aggressor: Player) -> None:
         """Return uncalled portion of a bet to the aggressor."""
         # MONEY: All uncalled bet calculations use cents
+        # TODO: NOTE: Not entirely sure on an instance where this is applicable...I should find out...
         if not aggressor:
             return
         
@@ -1198,7 +1315,12 @@ class Hand:
         self.step_number += 1
 
     def validate_action(self, player: Player, action: ActionType, amount: int = 0) -> ValidatedAction:
-        """Validate an action before applying it."""
+        """
+        Validates an Action
+        Returns: ValidatedAction: 
+        
+        """
+        # NOTE: I think actions may be getting validated twice?
         current_bet = player.current_bet
         amount_to_call = self.highest_bet - current_bet
         
@@ -1211,6 +1333,7 @@ class Hand:
                 reopen_action=False
             )
         
+        # TODO: here may need some sort of loop in logic for manual input
         elif action == ActionType.CHECK:
             if amount_to_call > 0:
                 raise ValueError(f"Cannot check when facing {amount_to_call} to call")
@@ -1222,10 +1345,12 @@ class Hand:
                 reopen_action=False
             )
         
+        # TODO: Will need to add a similiar loop here
         elif action == ActionType.CALL:
             if amount_to_call <= 0:
                 raise ValueError("Cannot call when no bet to call")
             if amount_to_call > player.stack:
+                # TODO: NOTE: DO I have to update the the player is all in here, or is this noted later in logic?
                 # Player is going all-in - they can call their entire stack
                 call_amount = player.stack
             else:
@@ -1239,6 +1364,7 @@ class Hand:
                 reopen_action=False
             )
         
+        # TODO: Loops for a manual player to re-enter logic here.
         elif action == ActionType.RAISE:
             if amount <= self.highest_bet:
                 raise ValueError(f"Raise amount {amount} must be greater than current bet {self.highest_bet}")
@@ -1252,6 +1378,7 @@ class Hand:
             if additional_amount > player.stack:
                 raise ValueError(f"Cannot raise to {amount} (additional {additional_amount}) with stack {player.stack}")
             
+            # TODO: NOTE: reopen_aciton, is_full_raise logic is a bit hazy
             raise_increment = amount - self.highest_bet
             is_full_raise = raise_increment >= self.last_full_raise_increment
             
