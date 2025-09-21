@@ -1,6 +1,7 @@
 import sqlite3
 from collections import deque
 from collections.abc import Iterator
+
 import quads.engine.player as quads_player
 from quads.deuces.card import Card
 from quads.deuces.deck import Deck

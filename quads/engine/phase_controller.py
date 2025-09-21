@@ -3,10 +3,11 @@ import sqlite3
 from collections import deque
 from typing import TYPE_CHECKING
 
+import quads.engine.hand as hand_module
+
 from .betting_order import BettingOrder
 from .enums import ActionType, Phase
 from .logger import get_logger
-import quads.engine.hand as hand_module
 
 if TYPE_CHECKING:
     
