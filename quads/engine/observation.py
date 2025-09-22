@@ -11,13 +11,13 @@ Key principles:
 - Consistent data types
 """
 
-import numpy as np
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+import numpy as np
 
 from .action_data import GameStateSnapshot
 from .enums import Phase
-from .money import Cents, from_cents
 from .player import Position
 
 
@@ -212,14 +212,14 @@ class ObservationBuilder:
         if not hero_found:
             raise ValueError(f"Player {player_id} not found in state")
     
-    def _get_player(self, state: GameStateSnapshot, player_id: int) -> Optional[Dict[str, Any]]:
+    def _get_player(self, state: GameStateSnapshot, player_id: int) -> dict[str, Any] | None:
         """Get player data from state."""
         for player in state.players:
             if player['id'] == player_id:
                 return player
         return None
     
-    def _extract_core_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_core_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract core game state features."""
         # Street one-hot encoding
         street_one_hot = np.zeros(5, dtype=np.float32)
@@ -242,7 +242,7 @@ class ObservationBuilder:
             'hero_position_one_hot': hero_position_one_hot
         }
     
-    def _extract_pot_betting_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_pot_betting_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract pot and betting metrics."""
         pot_in_bb = state.pot_cents / self.big_blind_cents
         
@@ -268,7 +268,7 @@ class ObservationBuilder:
             'bet_to_call_ratio': bet_to_call_ratio
         }
     
-    def _extract_stack_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_stack_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract stack-related metrics."""
         hero_stack_in_bb = hero.get('stack', 0) / self.big_blind_cents
         
@@ -295,7 +295,7 @@ class ObservationBuilder:
             'spr': spr
         }
     
-    def _extract_preflop_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_preflop_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract preflop hand features."""
         # Get hole cards from hero's hand contribution data
         hole_cards = hero.get('hole_cards')
@@ -349,7 +349,7 @@ class ObservationBuilder:
             'hand_strength_percentile': hand_strength_percentile
         }
     
-    def _extract_betting_history_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_betting_history_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract betting history flags."""
         # Count raises this street (simplified - would need more detailed tracking)
         raises_this_street = 0  # TODO: Implement proper raise counting
@@ -370,7 +370,7 @@ class ObservationBuilder:
             'has_position': has_position
         }
     
-    def _extract_board_texture_features(self, state: GameStateSnapshot) -> Dict[str, Any]:
+    def _extract_board_texture_features(self, state: GameStateSnapshot) -> dict[str, Any]:
         """Extract board texture analysis."""
         board_cards = state.community_cards
         
@@ -417,7 +417,7 @@ class ObservationBuilder:
             'board_coordination': board_coordination
         }
     
-    def _extract_additional_features(self, state: GameStateSnapshot, hero: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_additional_features(self, state: GameStateSnapshot, hero: dict[str, Any]) -> dict[str, Any]:
         """Extract additional contextual features."""
         # Players acted this street
         players_acted_this_street = sum(state.acted_this_round.values())
@@ -496,7 +496,7 @@ class ObservationBuilder:
         
         return min(base_strength, 1.0)
     
-    def _has_position(self, position: Optional[str]) -> int:
+    def _has_position(self, position: str | None) -> int:
         """Determine if player has position (simplified)."""
         if not position:
             return 0
@@ -510,7 +510,7 @@ class ObservationBuilder:
         
         return position_ranks.get(position.lower(), 0)
     
-    def _calculate_straighty_index(self, ranks: List[int]) -> float:
+    def _calculate_straighty_index(self, ranks: list[int]) -> float:
         """Calculate how 'straighty' the board is (0-1)."""
         if len(ranks) < 2:
             return 0.0
@@ -529,7 +529,7 @@ class ObservationBuilder:
         # Normalize to 0-1 (max possible consecutive is 5)
         return max_consecutive / 5.0
     
-    def _calculate_board_coordination(self, ranks: List[int], suits: List[str]) -> float:
+    def _calculate_board_coordination(self, ranks: list[int], suits: list[str]) -> float:
         """Calculate board coordination (0-1)."""
         if len(ranks) < 2:
             return 0.0

@@ -4,13 +4,17 @@ Comprehensive tests for ObservationBuilder.
 Tests all feature categories, edge cases, and validation logic.
 """
 
-import pytest
 import numpy as np
+import pytest
+
 from quads.engine.action_data import GameStateSnapshot
 from quads.engine.enums import Phase
 from quads.engine.money import to_cents
-from quads.engine.observation import ObservationBuilder, ObservationSchema, build_observation
-from quads.engine.player import Position
+from quads.engine.observation import (
+    ObservationBuilder,
+    ObservationSchema,
+    build_observation,
+)
 
 
 class TestObservationBuilder:
@@ -452,7 +456,7 @@ class TestConvenienceFunction:
     
     def test_build_observation_function(self):
         """Test the build_observation convenience function."""
-        builder = ObservationBuilder(small_blind=0.25, big_blind=0.50)
+        # builder = ObservationBuilder(small_blind=0.25, big_blind=0.50)
         
         state = GameStateSnapshot(
             hand_id=1,
