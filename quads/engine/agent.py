@@ -6,6 +6,7 @@ to interact with the poker engine through a consistent API.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from .action_data import ValidActions
 from .enums import ActionType
@@ -35,6 +36,25 @@ class Agent(ABC):
             - confidence_score: Optional confidence/probability score (0.0-1.0)
         """
         pass
+    
+    def act_with_context(self, obs: ObservationSchema, valid_actions: ValidActions, 
+                        game_state: dict[str, Any] | None = None) -> tuple[ActionType, float | None]:
+        """
+        Make an action decision with additional game state context.
+        
+        This method allows agents to access raw game state data (like hole cards)
+        that isn't available in the observation schema. Default implementation
+        delegates to the standard act() method.
+        
+        Args:
+            obs: Current observation of the game state
+            valid_actions: Available actions the agent can take
+            game_state: Additional game state context (hole cards, board, etc.)
+            
+        Returns:
+            Tuple of (action_type, confidence_score)
+        """
+        return self.act(obs, valid_actions)
     
     def reset(self) -> None:
         """

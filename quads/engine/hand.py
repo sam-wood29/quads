@@ -594,7 +594,25 @@ class Hand:
             )
             
             # Get action from agent
-            action_type, confidence = agent.act(obs, valid_actions_obj)
+            # Convert hole cards to string format for agent
+            hole_cards_str = None
+            if ap.hole_cards and len(ap.hole_cards) == 2:
+                from quads.deuces.card import Card
+                hole_cards_str = f"{Card.int_to_str(ap.hole_cards[0])},{Card.int_to_str(ap.hole_cards[1])}"
+            
+            # Convert community cards to string format
+            community_cards_str = None
+            if self.community_cards:
+                from quads.deuces.card import Card
+                community_cards_str = ','.join([Card.int_to_str(c) for c in self.community_cards])
+            
+            action_type, confidence = agent.act_with_context(obs, valid_actions_obj, {
+                'hole_cards': hole_cards_str,
+                'community_cards': community_cards_str,
+                'phase': self.phase.value,
+                'pot': self.pot_manager.total_table_cents(),
+                'highest_bet': self.highest_bet
+            })
             
             # For now, use 0 amount for raises - this could be improved
             amount = 0
