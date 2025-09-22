@@ -76,26 +76,14 @@ class Hand:
         else:
             community_cards_str = "None"
         
-<<<<<<< HEAD
-=======
-        
-        
-        
-        
->>>>>>> division
         return (f"-----Hand----\n"
                f"id: {self.id}\n"
                f"phase: {self.phase}\n"
                f"dealer index {self.dealer_index}\n"
                f"player ids in button order:\n"
                f"{', '.join(str(p.id) for p in self.players_in_button_order)}\n"
-<<<<<<< HEAD
-               f"pot: ${pot_dollars:.2f}\n"
-               f"community cards: {community_cards_str}\n")
-=======
                f"community cards: {community_cards_str}\n"
                f"pot: ${pot_dollars:.2f}\n")
->>>>>>> division
         
     
     def _create_initial_game_state(self) -> GameState:
