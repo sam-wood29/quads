@@ -24,9 +24,8 @@ class Pot:
 class PotManager:
     """
     Manages pot construction and chip movements.
-    
     Tracks player contributions and builds side pots for all-in scenarios.
-    Keeps betting logic simpler by centralizing pot operations.
+    Centralized Pot opperations
     """
     
     def __init__(self, players: set[PlayerId]):

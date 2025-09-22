@@ -3,6 +3,8 @@ import sqlite3
 from collections import deque
 from typing import TYPE_CHECKING
 
+import quads.engine.hand as hand_module
+
 from .betting_order import BettingOrder
 from .enums import ActionType, Phase
 from .logger import get_logger
@@ -70,8 +72,10 @@ class PhaseController:
     
     def enter_phase(self, to_phase: Phase) -> None:
         """Transition to `to_phase`, log `phase_advance`, and run per-phase hooks."""
+        # if i recall right, self.state.phase is gamestate type object.
         from_phase = Phase(self.state.phase)
         
+        # if not changing phase, skip validation
         if to_phase == from_phase:
             self.logger.warning(f"Already in phase {to_phase}, skipping transition")
             return
@@ -95,6 +99,7 @@ class PhaseController:
         bb = self.state.big_blind
         
         # Reset street variables
+        # TODO: look into what these street variables are...
         self.state.reset_street_vars(bb=bb, is_preflop=is_preflop)
         
         # Build actionable seats from BettingOrder
@@ -111,6 +116,7 @@ class PhaseController:
                     actionable_ids.append(player.id)
             
             self.state.actionable_seats = deque(actionable_ids)
+            # Very nice debugging statement here....
             self.logger.debug(f"Actionable seats for {current_phase}: {list(self.state.actionable_seats)}")
             
         except Exception as e:
@@ -321,7 +327,6 @@ class PhaseController:
     
     def _log_phase_advance(self, to_phase: Phase, from_phase: Phase) -> None:
         """Log phase advance to database."""
-        import quads.engine.hand as hand_module
         
         detail = {
             "from": from_phase.value,
@@ -355,6 +360,8 @@ class PhaseController:
     
     def _street_number_for(self, phase: Phase) -> int:
         """Map phase to street number."""
+        # TODO: verify this, not sure if this is correct
+        # looks like this is just assigning a numberic value to the phases of the hand.
         mapping = {
             Phase.DEAL: 0,
             Phase.PREFLOP: 1,
@@ -367,6 +374,7 @@ class PhaseController:
     
     def _validate_transition(self, from_phase: Phase, to_phase: Phase) -> None:
         """Validate that the phase transition is legal."""
+        # can showdown anytime after the deal
         allowed = {
             Phase.DEAL: {Phase.PREFLOP},
             Phase.PREFLOP: {Phase.FLOP, Phase.SHOWDOWN},
