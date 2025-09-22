@@ -15,6 +15,7 @@ from quads.engine.player import Player, Position
 from quads.engine.pot_manager import PotManager
 from quads.engine.validated_action import ValidatedAction
 
+from .agent import Agent
 from .phase_controller import PhaseController
 
 
@@ -22,7 +23,7 @@ class Hand:
     def __init__ (self, players: list[Player], id: int, deck: Deck, dealer_index: int, game_session_id: int, 
                   conn: sqlite3.Connection, script: dict | None = None, 
                   raise_settings: RaiseSetting = RaiseSetting.STANDARD, small_blind: float = 0.25, 
-                  big_blind: float = 0.50):
+                  big_blind: float = 0.50, agents: dict[int, Agent] | None = None):
         self.players = players
         self.id = id
         self.deck = deck
@@ -33,6 +34,7 @@ class Hand:
         self.raise_settings = raise_settings
         self.small_blind = small_blind
         self.big_blind = big_blind
+        self.agents = agents or {}
         # Remove script_index - no longer needed
         self.community_cards: list[int] = []
         self.pot = 0.0
@@ -541,13 +543,69 @@ class Hand:
         
     def _select_validate_action(self, ap: Player, valid_actions: dict):
         """
-        Select and validate action from structured script format.
+        Select and validate action from agent or script.
         
         Returns: 
         """
-        # TODO: add switch for agentic / manual inputs here
+        # Check if we have an agent for this player
+        if ap.id in self.agents:
+            # Use agent-based action selection
+            agent = self.agents[ap.id]
+            
+            # Create observation using the same approach as PokerEnv
+            from .action_data import GameStateSnapshot
+            from .observation import ObservationBuilder
+            
+            # Create game state snapshot
+            # Convert community cards to strings
+            community_cards_str = []
+            if self.community_cards:
+                from quads.deuces.card import Card
+                community_cards_str = [Card.int_to_str(c) for c in self.community_cards]
+            
+            state = GameStateSnapshot(
+                hand_id=self.id,
+                phase=self.phase,
+                pot_cents=int(self.pot * 100),  # Convert to cents
+                community_cards=community_cards_str,
+                players=[self._create_player_state(p, ap.id) for p in self.players],
+                highest_bet=self.highest_bet,
+                last_raise_increment=self.last_full_raise_increment,
+                last_aggressor_seat=self.last_aggressor.value if self.last_aggressor else None,
+                street_number=self.phase.value,
+                acted_this_round={},  # Simplified - could be improved
+                committed_this_round={p.id: p.current_bet for p in self.players}
+            )
+            
+            # Create observation builder and build observation
+            obs_builder = ObservationBuilder(self.small_blind, self.big_blind)
+            obs = obs_builder.build_observation(state, ap.id)
+            
+            # Create ValidActions object
+            from .action_data import ValidActions
+            valid_actions_obj = ValidActions(
+                player_id=ap.id,
+                actions=valid_actions['actions'],
+                raise_amounts=valid_actions.get('raise_amounts', []),
+                amount_to_call=valid_actions.get('amount_to_call', 0),
+                can_check=ActionType.CHECK in valid_actions['actions'],
+                can_bet=ActionType.RAISE in valid_actions['actions'],  # bet and raise are the same in this system
+                can_raise=ActionType.RAISE in valid_actions['actions']
+            )
+            
+            # Get action from agent
+            action_type, confidence = agent.act(obs, valid_actions_obj)
+            
+            # For now, use 0 amount for raises - this could be improved
+            amount = 0
+            if action_type == ActionType.RAISE and valid_actions.get('raise_amounts'):
+                amount = valid_actions['raise_amounts'][0]  # Use first raise amount
+            
+            return self.validate_action(ap, action_type, amount)
+        
+        # Fall back to script-based action selection
         if self.script is None:
-            raise RuntimeError("No script provided")
+            raise RuntimeError("No script provided and no agent available for player")
         
         # Simplified debug output
         # This may be good to look at for debugging output
@@ -573,6 +631,27 @@ class Hand:
         
         # Validate the action
         return self.validate_action(ap, action_type, amount)
+    
+    def _create_player_state(self, player: Player, current_player_id: int) -> dict:
+        """Create player state dict for GameStateSnapshot."""
+        # Only show hole cards for the current player to prevent information leakage
+        hole_cards = None
+        if player.id == current_player_id and player.hole_cards and isinstance(player.hole_cards, list):
+            from quads.deuces.card import Card
+            hole_cards = [Card.int_to_str(c) if isinstance(c, int) else c for c in player.hole_cards]
+        
+        return {
+            'id': player.id,
+            'name': player.name,
+            'stack': player.stack,
+            'position': str(player.position) if player.position else None,
+            'hole_cards': hole_cards,
+            'has_folded': player.has_folded,
+            'is_all_in': player.all_in,
+            'current_bet': player.current_bet,
+            'round_contrib': player.round_contrib,
+            'hand_contrib': player.hand_contrib
+        }
     
     def _get_player_action(self, acting_player: Player, game_state: GameState):
         """Get player action from script or manual input."""

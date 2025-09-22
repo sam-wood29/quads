@@ -131,9 +131,13 @@ class ObservationSchema:
         ])  # 6
         
         # Additional features
+        # Convert street_number to integer based on phase
+        street_number_map = {'deal': 0, 'preflop': 1, 'flop': 2, 'turn': 3, 'river': 4, 'showdown': 5}
+        street_number_int = street_number_map.get(self.street_number, 0) if isinstance(self.street_number, str) else self.street_number
+        
         features.extend([
             self.players_acted_this_street,
-            self.street_number,
+            street_number_int,
             self.is_all_in,
             self.stack_depth_category
         ])  # 4
